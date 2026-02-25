@@ -1,0 +1,1 @@
+location,date,rain_sum_mm,precip_sum_mm,temp_mean,wind_max,gust_max,rain_max_1h,rain_sum_lag_1,rain_max1h_lag_1,rain_sum_lag_2,rain_max1h_lag_2,rain_sum_lag_3,rain_max1h_lag_3,rain_sum_lag_7,rain_max1h_lag_7,rain_sum_roll3,rain_sum_roll7,river_discharge_m3s

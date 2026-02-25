@@ -1,11 +1,11 @@
 pandas
 numpy
-matplotlib
-seaborn
+streamlit
+plotly
 scikit-learn
 tensorflow
-streamlit
+joblib
 openmeteo-requests
 requests-cache
-retry
 retry-requests
+niquests
