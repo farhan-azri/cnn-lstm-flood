@@ -1,0 +1,11 @@
+pandas
+numpy
+matplotlib
+seaborn
+scikit-learn
+tensorflow
+streamlit
+openmeteo-requests
+requests-cache
+retry
+retry-requests
