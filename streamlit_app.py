@@ -1,71 +1,74 @@
+import joblib
 import streamlit as st
-import pandas as pd
-import plotly.express as px
-from pathlib import Path
+import tensorflow as tf
 
-DATA_PATH = "data/features_daily.csv"
-
-st.set_page_config(page_title="Flood EDA Dashboard", layout="wide")
-st.title("🌧️🌊 Flood EDA Dashboard (Hourly→Daily Pipeline)")
-
-if not Path(DATA_PATH).exists():
-    st.error(f"❌ Missing {DATA_PATH}. Run: python main.py --step all")
-    st.stop()
+MODEL_PATH = "run/cnn_lstm_model.h5"
+SCALER_PATH = "run/scaler.pkl"
+FEATURES_PATH = "run/feature_columns.pkl"
 
 
-@st.cache_data
-def load_features():
-    df = pd.read_csv(DATA_PATH)
-    df["date"] = pd.to_datetime(df["date"])
-    df["location"] = df["location"].astype(str).str.strip()
-    return df.sort_values(["location", "date"]).reset_index(drop=True)
+@st.cache_resource
+def load_artifacts_safe():
+    """
+    Robust model loader for TF/Keras version mismatches.
+    Tries:
+      1) load_model(..., compile=False)
+      2) load_model(..., compile=False, custom_objects=...)
+      3) load_model(..., custom_objects=...)  # last resort
+    """
+    scaler = joblib.load(SCALER_PATH)
+    feature_cols = joblib.load(FEATURES_PATH)
 
+    custom_objects = {
+        # Common aliases that break across TF/Keras versions
+        "mse": tf.keras.losses.MeanSquaredError(),
+        "mae": tf.keras.metrics.MeanAbsoluteError(),
+        "mean_squared_error": tf.keras.losses.MeanSquaredError(),
+        "mean_absolute_error": tf.keras.metrics.MeanAbsoluteError(),
+    }
 
-df = load_features()
+    errors = []
 
-# Sidebar filters
-st.sidebar.header("🔎 Filters")
-loc_option = st.sidebar.selectbox("Location", ["Both", "Klang", "Petaling"])
+    # Try 1: best practice for inference
+    try:
+        model = tf.keras.models.load_model(MODEL_PATH, compile=False)
+        return model, scaler, feature_cols
+    except Exception as e:
+        errors.append(f"Try 1 (compile=False) failed: {e}")
 
-if loc_option == "Both":
-    dff = df.copy()
-else:
-    dff = df[df["location"].str.lower() == loc_option.lower()].copy()
-
-min_d, max_d = dff["date"].min(), dff["date"].max()
-dr = st.sidebar.date_input("Date range", [min_d, max_d])
-start_d, end_d = pd.to_datetime(dr[0]), pd.to_datetime(dr[1])
-dff = dff[dff["date"].between(start_d, end_d)]
-
-# ============================================================
-# EDA (based on your eda.py)
-# ============================================================
-with st.expander("📊 Rainfall Distribution", expanded=True):
-    if "rain_sum_mm" not in dff.columns:
-        st.error("Column 'rain_sum_mm' not found in features_daily.csv")
-    else:
-        fig1 = px.histogram(
-            dff,
-            x="rain_sum_mm",
-            color="location" if loc_option == "Both" else None,
-            nbins=50,
-            title="Rainfall Distribution (Daily rain_sum_mm)"
+    # Try 2: compile=False + custom objects
+    try:
+        model = tf.keras.models.load_model(
+            MODEL_PATH,
+            compile=False,
+            custom_objects=custom_objects
         )
-        st.plotly_chart(fig1, use_container_width=True)
+        return model, scaler, feature_cols
+    except Exception as e:
+        errors.append(f"Try 2 (compile=False + custom_objects) failed: {e}")
 
-with st.expander("🌊 River Discharge Trend", expanded=True):
-    if "river_discharge_m3s" not in dff.columns:
-        st.error("Column 'river_discharge_m3s' not found in features_daily.csv")
-    else:
-        fig2 = px.line(
-            dff,
-            x="date",
-            y="river_discharge_m3s",
-            color="location" if loc_option == "Both" else None,
-            title="River Discharge Trend (Daily)"
+    # Try 3: custom objects without compile=False (rarely needed)
+    try:
+        model = tf.keras.models.load_model(
+            MODEL_PATH,
+            custom_objects=custom_objects
         )
-        fig2.update_layout(hovermode="x unified")
-        st.plotly_chart(fig2, use_container_width=True)
+        return model, scaler, feature_cols
+    except Exception as e:
+        errors.append(f"Try 3 (custom_objects) failed: {e}")
 
-with st.expander("🧾 Data Preview"):
-    st.dataframe(dff.tail(100))
+    # If all failed, show helpful message
+    debug_msg = "\n\n".join(errors)
+    raise RuntimeError(
+        "❌ Failed to load model. This is almost always a TensorFlow/Keras version mismatch.\n\n"
+        f"Details:\n{debug_msg}\n\n"
+        "✅ Fix (recommended):\n"
+        "1) Uninstall standalone keras:\n"
+        "   pip uninstall -y keras\n"
+        "2) Reinstall TensorFlow pinned:\n"
+        "   pip install 'tensorflow==2.15.*' 'numpy<2' 'protobuf<5'\n\n"
+        "✅ Best long-term fix:\n"
+        "- Re-save model in .keras format:\n"
+        "  model.save('run/cnn_lstm_model.keras')\n"
+        "- Then load with compile=False."
+    )
