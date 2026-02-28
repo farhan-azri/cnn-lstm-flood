@@ -1,4 +1,4 @@
-tensorflow==2.15.* ; platform_system != "Darwin"
+tensorflow #==2.15.* ; platform_system != "Darwin"
 tensorflow-macos==2.15.* ; platform_system == "Darwin"
 tensorflow-metal==1.* ; platform_system == "Darwin"
 numpy<2
