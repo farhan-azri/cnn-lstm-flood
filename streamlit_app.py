@@ -13,9 +13,7 @@ MODEL_PATH = "run/cnn_lstm_model.h5"
 SCALER_PATH = "run/scaler.pkl"
 FEATURES_PATH = "run/feature_columns.pkl"
 
-# Model was trained using a fixed window (likely 14).
-# We'll keep a default and auto-reduce ONLY if not enough data.
-MIN_SEQ_LEN = 7  # don't go too low or model becomes unstable
+MIN_SEQ_LEN = 7  # safety lower bound
 
 
 st.set_page_config(page_title="Flood Dashboard", layout="wide")
@@ -65,12 +63,21 @@ model, scaler, feature_cols = load_artifacts_safe()
 
 
 # ============================================================
-# SIDEBAR
+# SIDEBAR (include BOTH)
 # ============================================================
 st.sidebar.header("🔎 Filters")
 
-location = st.sidebar.selectbox("Location", sorted(df["location"].unique()))
-loc_df = df[df["location"] == location].sort_values("date").reset_index(drop=True)
+location_option = st.sidebar.selectbox(
+    "Location",
+    ["Both"] + sorted(df["location"].unique())
+)
+
+if location_option == "Both":
+    loc_df = df.copy()
+else:
+    loc_df = df[df["location"] == location_option].copy()
+
+loc_df = loc_df.sort_values(["location", "date"]).reset_index(drop=True)
 
 min_date, max_date = loc_df["date"].min(), loc_df["date"].max()
 
@@ -83,77 +90,53 @@ forecast_end_date = pd.to_datetime(forecast_end_date)
 
 loc_df_ref = loc_df[loc_df["date"] <= ref_date].copy()
 
-DEFAULT_SEQ_LEN = int(loc_df_ref["river_discharge_m3s"].notna().sum())
-
 
 # ============================================================
 # EDA
 # ============================================================
 with st.expander("🌊 EDA: River Discharge Trend", expanded=True):
-    fig = px.line(loc_df_ref, x="date", y="river_discharge_m3s", title=f"River Discharge — {location}")
+    fig = px.line(
+        loc_df_ref,
+        x="date",
+        y="river_discharge_m3s",
+        color="location" if location_option == "Both" else None,
+        title=f"River Discharge — {location_option}",
+    )
     fig.update_layout(hovermode="x unified")
     st.plotly_chart(fig, use_container_width=True)
 
 
 # ============================================================
-# DYNAMIC SEQ LEN (based on available daily rows)
-# ============================================================
-# Count daily rows where target exists (acts like flood_daily availability)
-available_days = int(loc_df_ref["river_discharge_m3s"].notna().sum())
-
-# # User can optionally cap max sequence length
-# user_max_seq_len = st.sidebar.slider(
-#     "Max sequence length (days)",
-#     min_value=MIN_SEQ_LEN,
-#     max_value=max(DEFAULT_SEQ_LEN, MIN_SEQ_LEN),
-#     value=DEFAULT_SEQ_LEN,
-# )
-
-# # Dynamic length: if data is short, reduce seq_len automatically
-# seq_len = min(user_max_seq_len, available_days)
-
-# Model input length is fixed — we must keep it at DEFAULT_SEQ_LEN.
-# If seq_len < DEFAULT_SEQ_LEN, we will stop and tell user (unless you re-train model).
-MODEL_SEQ_LEN = DEFAULT_SEQ_LEN
-
-
-# ============================================================
 # PREDICTION
 # ============================================================
-with st.expander("🤖 Prediction: Forecast until selected date", expanded=True):
-    st.caption(
-        "Forecast is generated day-by-day from the last N days up to your **history date**.\n\n"
-        "⚠️ Assumption: future feature values are held constant at the last known day.\n"
-        "For realistic forecasts, fetch weather forecast and rebuild features forward."
-    )
-
-    # st.write(f"📌 Available daily rows up to history date: **{available_days}**")
-    # st.write(f"📌 Selected dynamic seq_len: **{seq_len}** days")
-    # st.write(f"📌 Model expects fixed seq_len: **{MODEL_SEQ_LEN}** days")
-
+with st.expander("Flood Potential Prediction", expanded=True):
     if forecast_end_date <= ref_date:
         st.warning("Forecast until date must be AFTER history date.")
         st.stop()
 
-    if available_days < MODEL_SEQ_LEN:
+    # Decide model sequence length based on selection
+    if location_option == "Both":
+        # Use minimum available days across locations to ensure each location can forecast
+        available_by_loc = loc_df_ref.groupby("location")["river_discharge_m3s"].apply(lambda s: s.notna().sum())
+        if available_by_loc.empty:
+            st.error("No data available for prediction.")
+            st.stop()
+        MODEL_SEQ_LEN = int(available_by_loc.min())
+    else:
+        MODEL_SEQ_LEN = int(loc_df_ref["river_discharge_m3s"].notna().sum())
+
+    if MODEL_SEQ_LEN < MIN_SEQ_LEN:
         st.error(
-            f"Not enough daily rows for this model. Need at least {MODEL_SEQ_LEN} days, "
-            f"but only {available_days} are available up to {ref_date.date()}.\n\n"
-            "✅ Fix options:\n"
-            "- Choose a later 'Use history up to date'\n"
-            "- Or retrain model with smaller SEQUENCE_LENGTH"
+            f"Not enough daily rows for prediction. Need at least {MIN_SEQ_LEN} days, "
+            f"but only {MODEL_SEQ_LEN} are available up to {ref_date.date()}."
         )
         st.stop()
 
-    # Always use MODEL_SEQ_LEN for the trained model
-    seq = loc_df_ref.tail(MODEL_SEQ_LEN).copy()
+    def forecast_for_one_location(one_loc_df_ref: pd.DataFrame) -> pd.DataFrame:
+        """Forecast discharge day-by-day until forecast_end_date for a single location."""
+        one_loc_df_ref = one_loc_df_ref.sort_values("date").reset_index(drop=True)
 
-    # st.subheader(f"Input Sequence (Last {MODEL_SEQ_LEN} Days)")
-    st.dataframe(seq[["date"] + feature_cols + ["river_discharge_m3s"]])
-
-    if st.button("🚀 Run Forecast"):
-        start = time.time()
-
+        seq = one_loc_df_ref.tail(MODEL_SEQ_LEN).copy()
         window_features = seq[feature_cols].copy().reset_index(drop=True)
         last_feature_row = window_features.iloc[-1].copy()
 
@@ -171,20 +154,50 @@ with st.expander("🤖 Prediction: Forecast until selected date", expanded=True)
 
             window_features = pd.concat(
                 [window_features.iloc[1:], pd.DataFrame([last_feature_row])],
-                ignore_index=True
+                ignore_index=True,
             )
 
             cur_date = next_date
 
-        forecast_df = pd.DataFrame(preds)
+        return pd.DataFrame(preds)
+
+    if st.button("🚀 Run Forecast"):
+        start = time.time()
+
+        if location_option == "Both":
+            all_forecasts = []
+            for loc, g in loc_df_ref.groupby("location"):
+                g = g[g["river_discharge_m3s"].notna()].copy()
+                if len(g) < MODEL_SEQ_LEN:
+                    continue
+                fc = forecast_for_one_location(g)
+                if not fc.empty:
+                    fc["location"] = loc
+                    all_forecasts.append(fc)
+
+            if not all_forecasts:
+                st.error("No forecasts generated. Check data availability per location.")
+                st.stop()
+
+            forecast_df = pd.concat(all_forecasts, ignore_index=True)
+
+        else:
+            g = loc_df_ref[loc_df_ref["river_discharge_m3s"].notna()].copy()
+            if len(g) < MODEL_SEQ_LEN:
+                st.error("Not enough non-null discharge rows for the selected history date.")
+                st.stop()
+            forecast_df = forecast_for_one_location(g)
+            forecast_df["location"] = location_option
 
         latency = round((time.time() - start) * 1000, 2)
-        st.success(f"✅ Forecast completed in {latency} ms | Horizon: {len(forecast_df)} day(s)")
+        st.success(f"✅ Forecast completed in {latency} ms | Horizon: {forecast_df['date'].nunique()} day(s)")
 
-        hist_plot = loc_df_ref[["date", "river_discharge_m3s"]].copy()
-        hist_plot["type"] = "Actual"
+        # Prepare historical plot
+        hist_plot = loc_df_ref[["date", "location", "river_discharge_m3s"]].copy()
         hist_plot = hist_plot.rename(columns={"river_discharge_m3s": "value"})
+        hist_plot["type"] = "Actual"
 
+        # Prepare forecast plot
         fc_plot = forecast_df.rename(columns={"predicted_discharge": "value"}).copy()
         fc_plot["type"] = "Forecast"
 
@@ -194,11 +207,12 @@ with st.expander("🤖 Prediction: Forecast until selected date", expanded=True)
             combined,
             x="date",
             y="value",
-            color="type",
-            title=f"Actual (≤ {ref_date.date()}) vs Forecast (→ {forecast_end_date.date()}) — {location}",
+            color="location" if location_option == "Both" else None,
+            line_dash="type",
+            title=f"Actual (≤ {ref_date.date()}) vs Forecast (→ {forecast_end_date.date()}) — {location_option}",
         )
         figp.update_layout(hovermode="x unified")
         st.plotly_chart(figp, use_container_width=True)
 
         st.subheader("📅 Forecast Table")
-        st.dataframe(forecast_df)
+        st.dataframe(forecast_df.sort_values(["location", "date"]).reset_index(drop=True))

@@ -13,3 +13,5 @@ tensorflow-macos==2.15.*
 tensorflow-metal==1.*
 numpy<2
 protobuf<5
+setuptools 
+wheel
