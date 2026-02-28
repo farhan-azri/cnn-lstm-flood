@@ -101,16 +101,16 @@ with st.expander("🌊 EDA: River Discharge Trend", expanded=True):
 # Count daily rows where target exists (acts like flood_daily availability)
 available_days = int(loc_df_ref["river_discharge_m3s"].notna().sum())
 
-# User can optionally cap max sequence length
-user_max_seq_len = st.sidebar.slider(
-    "Max sequence length (days)",
-    min_value=MIN_SEQ_LEN,
-    max_value=max(DEFAULT_SEQ_LEN, MIN_SEQ_LEN),
-    value=DEFAULT_SEQ_LEN,
-)
+# # User can optionally cap max sequence length
+# user_max_seq_len = st.sidebar.slider(
+#     "Max sequence length (days)",
+#     min_value=MIN_SEQ_LEN,
+#     max_value=max(DEFAULT_SEQ_LEN, MIN_SEQ_LEN),
+#     value=DEFAULT_SEQ_LEN,
+# )
 
-# Dynamic length: if data is short, reduce seq_len automatically
-seq_len = min(user_max_seq_len, available_days)
+# # Dynamic length: if data is short, reduce seq_len automatically
+# seq_len = min(user_max_seq_len, available_days)
 
 # Model input length is fixed — we must keep it at DEFAULT_SEQ_LEN.
 # If seq_len < DEFAULT_SEQ_LEN, we will stop and tell user (unless you re-train model).
@@ -127,9 +127,9 @@ with st.expander("🤖 Prediction: Forecast until selected date", expanded=True)
         "For realistic forecasts, fetch weather forecast and rebuild features forward."
     )
 
-    st.write(f"📌 Available daily rows up to history date: **{available_days}**")
-    st.write(f"📌 Selected dynamic seq_len: **{seq_len}** days")
-    st.write(f"📌 Model expects fixed seq_len: **{MODEL_SEQ_LEN}** days")
+    # st.write(f"📌 Available daily rows up to history date: **{available_days}**")
+    # st.write(f"📌 Selected dynamic seq_len: **{seq_len}** days")
+    # st.write(f"📌 Model expects fixed seq_len: **{MODEL_SEQ_LEN}** days")
 
     if forecast_end_date <= ref_date:
         st.warning("Forecast until date must be AFTER history date.")
@@ -148,7 +148,7 @@ with st.expander("🤖 Prediction: Forecast until selected date", expanded=True)
     # Always use MODEL_SEQ_LEN for the trained model
     seq = loc_df_ref.tail(MODEL_SEQ_LEN).copy()
 
-    st.subheader(f"Input Sequence (Last {MODEL_SEQ_LEN} Days)")
+    # st.subheader(f"Input Sequence (Last {MODEL_SEQ_LEN} Days)")
     st.dataframe(seq[["date"] + feature_cols + ["river_discharge_m3s"]])
 
     if st.button("🚀 Run Forecast"):
