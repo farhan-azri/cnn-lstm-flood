@@ -1,41 +1,14 @@
-pandas
-numpy
+tensorflow==2.15.* ; platform_system != "Darwin"
+tensorflow-macos==2.15.* ; platform_system == "Darwin"
+tensorflow-metal==1.* ; platform_system == "Darwin"
+numpy<2
+protobuf<5
 streamlit
-plotly
+pandas
 scikit-learn
-tensorflow
 joblib
+plotly
 openmeteo-requests
 requests-cache
 retry-requests
 niquests
-# tensorflow-macos==2.15.*
-# tensorflow-metal==1.*
-pillow
-protobuf
-tornado
-setuptools 
-wheel
-
-
-# # ----- Core -----
-# pandas>=3.0.0
-# numpy<2
-# pillow>=10.0.0
-# protobuf<5
-# tornado>=6.3.3
-# scikit-learn
-# joblib
-# plotly
-# streamlit
-
-# # ----- Open-Meteo -----
-# openmeteo-requests
-# requests-cache
-# retry-requests
-# niquests
-
-## ----- TensorFlow (platform-specific) -----
-# tensorflow==2.15.* ; platform_system != "Darwin"
-# tensorflow-macos==2.15.* ; platform_system == "Darwin"
-# tensorflow-metal==1.* ; platform_system == "Darwin"
