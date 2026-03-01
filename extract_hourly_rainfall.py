@@ -13,8 +13,8 @@ def _client():
 
 
 def extract_hourly_rainfall(
-    start_date: str = "2020-01-01",
-    end_date: str = "2025-10-31",
+    start_date: str = "2010-01-01",
+    end_date: str = "2025-12-31",
     save_csv: bool = True,
     out_path: str = "data/weather_hourly.csv",
 ):

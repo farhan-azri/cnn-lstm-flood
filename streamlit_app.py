@@ -81,14 +81,14 @@ loc_df = loc_df.sort_values(["location", "date"]).reset_index(drop=True)
 
 min_date, max_date = loc_df["date"].min(), loc_df["date"].max()
 
-ref_date = st.sidebar.date_input("Use history up to date", max_date)
-ref_date = pd.to_datetime(ref_date)
+# ref_date = st.sidebar.date_input("Use history up to date", max_date)
+# ref_date = pd.to_datetime(ref_date)
 
-default_forecast_end = min(max_date + pd.Timedelta(days=7), ref_date + pd.Timedelta(days=14))
+default_forecast_end = min(max_date + pd.Timedelta(days=7), max_date + pd.Timedelta(days=14))
 forecast_end_date = st.sidebar.date_input("Forecast until date", default_forecast_end)
 forecast_end_date = pd.to_datetime(forecast_end_date)
 
-loc_df_ref = loc_df[loc_df["date"] <= ref_date].copy()
+loc_df_ref = loc_df[loc_df["date"] <= max_date].copy()
 
 
 # ============================================================
@@ -110,7 +110,7 @@ with st.expander("🌊 EDA: River Discharge Trend", expanded=True):
 # PREDICTION
 # ============================================================
 with st.expander("Flood Potential Prediction", expanded=True):
-    if forecast_end_date <= ref_date:
+    if forecast_end_date <= max_date:
         st.warning("Forecast until date must be AFTER history date.")
         st.stop()
 

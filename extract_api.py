@@ -12,8 +12,8 @@ def get_openmeteo_client():
 
 
 def extract_weather_hourly_data(
-    start_date: str = "2020-01-01",
-    end_date: str = "2025-10-31",
+    start_date: str = "2010-01-01",
+    end_date: str = "2025-12-31",
     save_csv: bool = True,
 ):
     """
