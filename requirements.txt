@@ -1,11 +1,6 @@
-# tensorflow ==2.15.* ; platform_system != "Darwin"
-# tensorflow-macos==2.15.* ; platform_system == "Darwin"
-# tensorflow-metal==1.* ; platform_system == "Darwin"
-# numpy<2
-# protobuf>=5.28.0
-tensorflow
+tensorflow==2.13.0
 numpy
-protobuf
+protobuf==3.20.3
 streamlit
 pandas
 scikit-learn
