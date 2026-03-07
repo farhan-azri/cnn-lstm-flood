@@ -2,19 +2,19 @@ import time
 from pathlib import Path
 
 import joblib
-import numpy as np
 import pandas as pd
 import streamlit as st
 import plotly.express as px
-import plotly.graph_objects as go
 import tensorflow as tf
+
 
 DATA_PATH = "data/features_daily.csv"
 MODEL_PATH = "run/cnn_lstm_model.h5"
 SCALER_PATH = "run/scaler.pkl"
 FEATURES_PATH = "run/feature_columns.pkl"
 
-MIN_SEQ_LEN = 7
+MIN_SEQ_LEN = 7  # safety lower bound
+
 
 st.set_page_config(page_title="Flood Dashboard", layout="wide")
 st.title("🌊 Flood Prediction Dashboard")
@@ -45,14 +45,11 @@ def load_artifacts_safe():
         model = tf.keras.models.load_model(MODEL_PATH, compile=False)
         return model, scaler, feature_cols
     except Exception:
-        model = tf.keras.models.load_model(
-            MODEL_PATH,
-            compile=False,
-            custom_objects=custom_objects
-        )
+        model = tf.keras.models.load_model(MODEL_PATH, compile=False, custom_objects=custom_objects)
         return model, scaler, feature_cols
 
 
+# ---- file checks ----
 missing = [p for p in [DATA_PATH, MODEL_PATH, SCALER_PATH, FEATURES_PATH] if not Path(p).exists()]
 if missing:
     st.error("❌ Missing required files:")
@@ -66,7 +63,7 @@ model, scaler, feature_cols = load_artifacts_safe()
 
 
 # ============================================================
-# SIDEBAR
+# SIDEBAR (include BOTH)
 # ============================================================
 st.sidebar.header("🔎 Filters")
 
@@ -84,14 +81,14 @@ loc_df = loc_df.sort_values(["location", "date"]).reset_index(drop=True)
 
 min_date, max_date = loc_df["date"].min(), loc_df["date"].max()
 
-ref_date = st.sidebar.date_input("Use history up to date", max_date)
-ref_date = pd.to_datetime(ref_date)
+# ref_date = st.sidebar.date_input("Use history up to date", max_date)
+# ref_date = pd.to_datetime(ref_date)
 
-default_forecast_end = min(max_date + pd.Timedelta(days=7), ref_date + pd.Timedelta(days=14))
+default_forecast_end = min(max_date + pd.Timedelta(days=7), max_date + pd.Timedelta(days=14))
 forecast_end_date = st.sidebar.date_input("Forecast until date", default_forecast_end)
 forecast_end_date = pd.to_datetime(forecast_end_date)
 
-loc_df_ref = loc_df[loc_df["date"] <= ref_date].copy()
+loc_df_ref = loc_df[loc_df["date"] <= max_date].copy()
 
 
 # ============================================================
@@ -110,178 +107,16 @@ with st.expander("🌊 EDA: River Discharge Trend", expanded=True):
 
 
 # ============================================================
-# EXTREME EVENT ANALYSIS
-# ============================================================
-with st.expander("⚡ Extreme Rainfall vs Extreme River Discharge", expanded=True):
-    percentile = st.slider(
-        "Extreme event percentile threshold",
-        min_value=80,
-        max_value=99,
-        value=95,
-        step=1
-    )
-
-    if loc_df_ref.empty:
-        st.warning("No data available for the selected filters.")
-    else:
-        combined = loc_df_ref[["date", "location", "rain_sum_mm", "river_discharge_m3s"]].copy()
-
-        rain_threshold = combined["rain_sum_mm"].quantile(percentile / 100)
-        discharge_threshold = combined["river_discharge_m3s"].quantile(percentile / 100)
-
-        combined["extreme_rain"] = np.where(combined["rain_sum_mm"] >= rain_threshold, 1, 0)
-        combined["extreme_discharge"] = np.where(combined["river_discharge_m3s"] >= discharge_threshold, 1, 0)
-        combined["extreme_both"] = np.where(
-            (combined["extreme_rain"] == 1) & (combined["extreme_discharge"] == 1),
-            1,
-            0
-        )
-
-        st.write(f"🌧️ Extreme Rainfall Threshold: ≥ {rain_threshold:.2f} mm")
-        st.write(f"🌊 Extreme River Discharge Threshold: ≥ {discharge_threshold:.2f} m³/s")
-
-        # Combined visualization
-        fig_extreme = go.Figure()
-
-        if location_option == "Both":
-            for loc in combined["location"].unique():
-                sub = combined[combined["location"] == loc]
-                fig_extreme.add_trace(
-                    go.Scatter(
-                        x=sub["date"],
-                        y=sub["river_discharge_m3s"],
-                        mode="lines",
-                        name=f"{loc} Discharge",
-                        opacity=0.6
-                    )
-                )
-        else:
-            fig_extreme.add_trace(
-                go.Scatter(
-                    x=combined["date"],
-                    y=combined["river_discharge_m3s"],
-                    mode="lines",
-                    name="River Discharge",
-                    opacity=0.6
-                )
-            )
-
-        discharge_pts = combined[combined["extreme_discharge"] == 1]
-        rain_pts = combined[combined["extreme_rain"] == 1]
-        both_pts = combined[combined["extreme_both"] == 1]
-
-        fig_extreme.add_trace(
-            go.Scatter(
-                x=discharge_pts["date"],
-                y=discharge_pts["river_discharge_m3s"],
-                mode="markers",
-                name=f"Extreme Discharge (≥{percentile}th%)",
-                marker=dict(color="red", size=7)
-            )
-        )
-
-        fig_extreme.add_trace(
-            go.Scatter(
-                x=rain_pts["date"],
-                y=rain_pts["river_discharge_m3s"],
-                mode="markers",
-                name=f"Extreme Rainfall (≥{percentile}th%)",
-                marker=dict(color="royalblue", size=7)
-            )
-        )
-
-        fig_extreme.add_trace(
-            go.Scatter(
-                x=both_pts["date"],
-                y=both_pts["river_discharge_m3s"],
-                mode="markers",
-                name="Concurrent Extreme (Rain + Discharge)",
-                marker=dict(color="purple", size=10, line=dict(color="black", width=1))
-            )
-        )
-
-        fig_extreme.update_layout(
-            title=f"Combined Extreme Events: Rainfall vs River Discharge — {location_option}",
-            xaxis_title="Date",
-            yaxis_title="River Discharge (m³/s)",
-            hovermode="x unified"
-        )
-
-        st.plotly_chart(fig_extreme, use_container_width=True)
-
-        # Concurrent event table
-        st.subheader("📅 Concurrent Extreme Events")
-        extreme_both_table = combined[combined["extreme_both"] == 1][[
-            "date",
-            "location",
-            "rain_sum_mm",
-            "river_discharge_m3s",
-            "extreme_rain",
-            "extreme_discharge",
-            "extreme_both"
-        ]].sort_values("date")
-
-        st.dataframe(extreme_both_table, use_container_width=True)
-        st.write(f"🔢 Total concurrent extreme events: {len(extreme_both_table)}")
-
-        # Correlation & summary
-        corr_val = combined["rain_sum_mm"].corr(combined["river_discharge_m3s"])
-
-        summary = pd.DataFrame({
-            "Metric": [
-                "Total Records",
-                "Extreme Rainfall Days",
-                "Extreme Discharge Days",
-                "Concurrent Extreme Days",
-                "Rain–Discharge Correlation"
-            ],
-            "Value": [
-                len(combined),
-                int(combined["extreme_rain"].sum()),
-                int(combined["extreme_discharge"].sum()),
-                int(combined["extreme_both"].sum()),
-                round(corr_val, 3) if pd.notna(corr_val) else None
-            ]
-        })
-
-        st.subheader("📊 Summary")
-        st.dataframe(summary, use_container_width=True)
-
-        # Location-wise bar chart
-        if location_option == "Both":
-            location_summary = (
-                combined.groupby("location")[["extreme_rain", "extreme_discharge", "extreme_both"]]
-                .sum()
-                .reset_index()
-                .melt(id_vars="location", var_name="Event Type", value_name="Count")
-            )
-
-            location_summary["Event Type"] = location_summary["Event Type"].replace({
-                "extreme_rain": "Extreme Rain",
-                "extreme_discharge": "Extreme Discharge",
-                "extreme_both": "Concurrent Both"
-            })
-
-            fig_bar = px.bar(
-                location_summary,
-                x="location",
-                y="Count",
-                color="Event Type",
-                barmode="group",
-                title="Extreme Event Counts by Location"
-            )
-            st.plotly_chart(fig_bar, use_container_width=True)
-
-
-# ============================================================
 # PREDICTION
 # ============================================================
 with st.expander("Flood Potential Prediction", expanded=True):
-    if forecast_end_date <= ref_date:
+    if forecast_end_date <= max_date:
         st.warning("Forecast until date must be AFTER history date.")
         st.stop()
 
+    # Decide model sequence length based on selection
     if location_option == "Both":
+        # Use minimum available days across locations to ensure each location can forecast
         available_by_loc = loc_df_ref.groupby("location")["river_discharge_m3s"].apply(lambda s: s.notna().sum())
         if available_by_loc.empty:
             st.error("No data available for prediction.")
@@ -298,6 +133,7 @@ with st.expander("Flood Potential Prediction", expanded=True):
         st.stop()
 
     def forecast_for_one_location(one_loc_df_ref: pd.DataFrame) -> pd.DataFrame:
+        """Forecast discharge day-by-day until forecast_end_date for a single location."""
         one_loc_df_ref = one_loc_df_ref.sort_values("date").reset_index(drop=True)
 
         seq = one_loc_df_ref.tail(MODEL_SEQ_LEN).copy()
@@ -356,17 +192,19 @@ with st.expander("Flood Potential Prediction", expanded=True):
         latency = round((time.time() - start) * 1000, 2)
         st.success(f"✅ Forecast completed in {latency} ms | Horizon: {forecast_df['date'].nunique()} day(s)")
 
+        # Prepare historical plot
         hist_plot = loc_df_ref[["date", "location", "river_discharge_m3s"]].copy()
         hist_plot = hist_plot.rename(columns={"river_discharge_m3s": "value"})
         hist_plot["type"] = "Actual"
 
+        # Prepare forecast plot
         fc_plot = forecast_df.rename(columns={"predicted_discharge": "value"}).copy()
         fc_plot["type"] = "Forecast"
 
-        combined_plot = pd.concat([hist_plot, fc_plot], ignore_index=True)
+        combined = pd.concat([hist_plot, fc_plot], ignore_index=True)
 
         figp = px.line(
-            combined_plot,
+            combined,
             x="date",
             y="value",
             color="location" if location_option == "Both" else None,
