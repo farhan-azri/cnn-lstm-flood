@@ -15,9 +15,8 @@
 # h5py
 streamlit
 pandas
-numpy<2
+numpy
 plotly
 scikit-learn
-tensorflow==2.13.0
-protobuf==3.20.3
+tensorflow==2.21.0
 h5py
