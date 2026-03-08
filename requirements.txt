@@ -1,6 +1,5 @@
 tensorflow==2.13.0
-numpy
-numpy._core
+numpy<2
 protobuf==3.20.3
 streamlit
 pandas
