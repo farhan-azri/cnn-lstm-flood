@@ -161,22 +161,22 @@ forecast_end_date = pd.to_datetime(forecast_end_date)
 loc_df_ref = loc_df[loc_df["date"] <= ref_date].copy()
 
 
-# ============================================================
-# EDA
-# ============================================================
-with st.expander("🌊 EDA: River Discharge Trend", expanded=True):
-    if loc_df_ref.empty:
-        st.warning("No historical data available up to the selected reference date.")
-    else:
-        fig = px.line(
-            loc_df_ref,
-            x="date",
-            y=TARGET_COL,
-            color="location" if location_option == "Both" else None,
-            title=f"River Discharge — {location_option}",
-        )
-        fig.update_layout(hovermode="x unified")
-        st.plotly_chart(fig, use_container_width=True)
+# # ============================================================
+# # EDA
+# # ============================================================
+# with st.expander("🌊 EDA: River Discharge Trend", expanded=True):
+#     if loc_df_ref.empty:
+#         st.warning("No historical data available up to the selected reference date.")
+#     else:
+#         fig = px.line(
+#             loc_df_ref,
+#             x="date",
+#             y=TARGET_COL,
+#             color="location" if location_option == "Both" else None,
+#             title=f"River Discharge — {location_option}",
+#         )
+#         fig.update_layout(hovermode="x unified")
+#         st.plotly_chart(fig, use_container_width=True)
 
 
 # ============================================================
