@@ -27,6 +27,55 @@ st.title("🌊 Flood Prediction Dashboard")
 
 
 # ============================================================
+# FORECAST HELPERS
+# ============================================================
+def forecast_for_one_location(
+    one_loc_df_ref: pd.DataFrame,
+    model_obj,
+    scaler_stats_obj: dict,
+    feature_columns: list[str],
+    seq_len: int,
+    forecast_until: pd.Timestamp,
+) -> pd.DataFrame:
+    one_loc_df_ref = one_loc_df_ref.sort_values("date").reset_index(drop=True)
+
+    clean = one_loc_df_ref.dropna(subset=feature_columns + [TARGET_COL]).copy()
+    if len(clean) < seq_len:
+        return pd.DataFrame(columns=["date", "predicted_discharge"])
+
+    seq = clean.tail(seq_len).copy()
+    window_features = seq[feature_columns].copy().reset_index(drop=True)
+    last_feature_row = window_features.iloc[-1].copy()
+
+    preds = []
+    cur_date = seq["date"].max()
+
+    while cur_date < forecast_until:
+        X_scaled = apply_saved_standard_scaler(
+            window_features.values,
+            scaler_stats_obj
+        )
+
+        X_scaled = X_scaled.reshape(1, seq_len, len(feature_columns)).astype(np.float32)
+        pred = float(model_obj.predict(X_scaled, verbose=0)[0][0])
+
+        next_date = cur_date + pd.Timedelta(days=1)
+        preds.append({
+            "date": next_date,
+            "predicted_discharge": pred,
+        })
+
+        # Keep same exogenous feature row for recursive forecasting
+        window_features = pd.concat(
+            [window_features.iloc[1:], pd.DataFrame([last_feature_row])],
+            ignore_index=True
+        )
+
+        cur_date = next_date
+
+    return pd.DataFrame(preds)
+
+# ============================================================
 # HELPERS
 # ============================================================
 def validate_required_files():
@@ -250,11 +299,11 @@ with st.expander("🚀 Flood Potential Prediction", expanded=True):
         figp.update_layout(hovermode="x unified")
         st.plotly_chart(figp, use_container_width=True)
 
-        st.subheader("📅 Forecast Table")
-        st.dataframe(
-            forecast_df.sort_values(["location", "date"]).reset_index(drop=True),
-            use_container_width=True
-        )
+        # st.subheader("📅 Forecast Table")
+        # st.dataframe(
+        #     forecast_df.sort_values(["location", "date"]).reset_index(drop=True),
+        #     use_container_width=True
+        # )
 
 
         
@@ -443,52 +492,5 @@ with st.expander("⚡ Extreme Rainfall vs Extreme River Discharge", expanded=Tru
             #     st.plotly_chart(fig_bar, use_container_width=True)
 
 
-# ============================================================
-# FORECAST HELPERS
-# ============================================================
-def forecast_for_one_location(
-    one_loc_df_ref: pd.DataFrame,
-    model_obj,
-    scaler_stats_obj: dict,
-    feature_columns: list[str],
-    seq_len: int,
-    forecast_until: pd.Timestamp,
-) -> pd.DataFrame:
-    one_loc_df_ref = one_loc_df_ref.sort_values("date").reset_index(drop=True)
 
-    clean = one_loc_df_ref.dropna(subset=feature_columns + [TARGET_COL]).copy()
-    if len(clean) < seq_len:
-        return pd.DataFrame(columns=["date", "predicted_discharge"])
-
-    seq = clean.tail(seq_len).copy()
-    window_features = seq[feature_columns].copy().reset_index(drop=True)
-    last_feature_row = window_features.iloc[-1].copy()
-
-    preds = []
-    cur_date = seq["date"].max()
-
-    while cur_date < forecast_until:
-        X_scaled = apply_saved_standard_scaler(
-            window_features.values,
-            scaler_stats_obj
-        )
-
-        X_scaled = X_scaled.reshape(1, seq_len, len(feature_columns)).astype(np.float32)
-        pred = float(model_obj.predict(X_scaled, verbose=0)[0][0])
-
-        next_date = cur_date + pd.Timedelta(days=1)
-        preds.append({
-            "date": next_date,
-            "predicted_discharge": pred,
-        })
-
-        # Keep same exogenous feature row for recursive forecasting
-        window_features = pd.concat(
-            [window_features.iloc[1:], pd.DataFrame([last_feature_row])],
-            ignore_index=True
-        )
-
-        cur_date = next_date
-
-    return pd.DataFrame(preds)
 
