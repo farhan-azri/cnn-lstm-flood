@@ -84,15 +84,15 @@ def validate_required_files():
     if missing:
         st.error("❌ Missing required files:")
         for item in missing:
-            st.write("-", item)
-        st.info("Run the training pipeline first so the artifacts are generated.")
+            st.write(f"- `{item}`")
+        st.info("Run the training pipeline first so the `.keras` model and artifacts are generated.")
         st.stop()
 
 
 def apply_saved_standard_scaler(X: np.ndarray, scaler_stats: dict) -> np.ndarray:
     """
-    Rebuild StandardScaler transform behavior using plain saved arrays:
-    z = (x - mean) / scale
+    Rebuild StandardScaler transform behavior using plain saved arrays.
+    Formula: z = (x - mean) / scale
     """
     mean_ = scaler_stats["mean_"]
     scale_ = scaler_stats["scale_"]
@@ -120,7 +120,7 @@ def load_data():
     return df.sort_values(["location", "date"]).reset_index(drop=True)
 
 
-@st.cache_resource
+@st.cache_resource(show_spinner="Loading enhanced AI model...")
 def load_artifacts():
     try:
         with open(FEATURES_PATH, "r", encoding="utf-8") as f:
@@ -139,6 +139,8 @@ def load_artifacts():
             "with_std": bool(raw["with_std"][0]),
         }
 
+        # compile=False ensures we don't need to load the Huber loss or Adam optimizer
+        # making inference faster and preventing custom object mismatch errors.
         model = tf.keras.models.load_model(MODEL_PATH, compile=False)
 
         return model, scaler_stats, feature_cols, metadata
@@ -210,8 +212,6 @@ forecast_end_date = pd.to_datetime(forecast_end_date)
 loc_df_ref = loc_df[loc_df["date"] <= ref_date].copy()
 
 
-
-
 # ============================================================
 # PREDICTION
 # ============================================================
@@ -227,14 +227,37 @@ with st.expander("🚀 Flood Potential Prediction", expanded=True):
         )
         st.stop()
 
-    if st.button("Run Forecast"):
-        start = time.time()
+    if st.button("Run Forecast", type="primary"):
+        with st.spinner("Running neural network predictions..."):
+            start = time.time()
 
-        if location_option == "Both":
-            all_forecasts = []
+            if location_option == "Both":
+                all_forecasts = []
 
-            for loc, g in loc_df_ref.groupby("location"):
-                fc = forecast_for_one_location(
+                for loc, g in loc_df_ref.groupby("location"):
+                    fc = forecast_for_one_location(
+                        one_loc_df_ref=g,
+                        model_obj=model,
+                        scaler_stats_obj=scaler_stats,
+                        feature_columns=feature_cols,
+                        seq_len=MODEL_SEQ_LEN,
+                        forecast_until=forecast_end_date,
+                    )
+
+                    if not fc.empty:
+                        fc["location"] = loc
+                        all_forecasts.append(fc)
+
+                if not all_forecasts:
+                    st.error("No forecasts generated. Check data availability per location.")
+                    st.stop()
+
+                forecast_df = pd.concat(all_forecasts, ignore_index=True)
+
+            else:
+                g = loc_df_ref[loc_df_ref["location"] == location_option].copy()
+
+                forecast_df = forecast_for_one_location(
                     one_loc_df_ref=g,
                     model_obj=model,
                     scaler_stats_obj=scaler_stats,
@@ -243,86 +266,39 @@ with st.expander("🚀 Flood Potential Prediction", expanded=True):
                     forecast_until=forecast_end_date,
                 )
 
-                if not fc.empty:
-                    fc["location"] = loc
-                    all_forecasts.append(fc)
+                if forecast_df.empty:
+                    st.error(
+                        f"Not enough valid rows for forecasting. Need at least {MODEL_SEQ_LEN} "
+                        f"rows with non-null target and features."
+                    )
+                    st.stop()
 
-            if not all_forecasts:
-                st.error("No forecasts generated. Check data availability per location.")
-                st.stop()
+                forecast_df["location"] = location_option
 
-            forecast_df = pd.concat(all_forecasts, ignore_index=True)
+            latency_ms = round((time.time() - start) * 1000, 2)
+            horizon_days = int(forecast_df["date"].nunique())
 
-        else:
-            g = loc_df_ref[loc_df_ref["location"] == location_option].copy()
+            st.success(f"✅ Forecast completed in {latency_ms} ms | Horizon: {horizon_days} day(s)")
 
-            forecast_df = forecast_for_one_location(
-                one_loc_df_ref=g,
-                model_obj=model,
-                scaler_stats_obj=scaler_stats,
-                feature_columns=feature_cols,
-                seq_len=MODEL_SEQ_LEN,
-                forecast_until=forecast_end_date,
+            hist_plot = loc_df_ref[["date", "location", TARGET_COL]].dropna().copy()
+            hist_plot = hist_plot.rename(columns={TARGET_COL: "value"})
+            hist_plot["type"] = "Actual"
+
+            fc_plot = forecast_df.rename(columns={"predicted_discharge": "value"}).copy()
+            fc_plot["type"] = "Forecast"
+
+            combined_plot = pd.concat([hist_plot, fc_plot], ignore_index=True)
+
+            figp = px.line(
+                combined_plot,
+                x="date",
+                y="value",
+                color="location" if location_option == "Both" else None,
+                line_dash="type",
+                title=f"Actual (≤ {ref_date.date()}) vs Forecast (→ {forecast_end_date.date()}) — {location_option}",
             )
-
-            if forecast_df.empty:
-                st.error(
-                    f"Not enough valid rows for forecasting. Need at least {MODEL_SEQ_LEN} "
-                    f"rows with non-null target and features."
-                )
-                st.stop()
-
-            forecast_df["location"] = location_option
-
-        latency_ms = round((time.time() - start) * 1000, 2)
-        horizon_days = int(forecast_df["date"].nunique())
-
-        st.success(f"✅ Forecast completed in {latency_ms} ms | Horizon: {horizon_days} day(s)")
-
-        hist_plot = loc_df_ref[["date", "location", TARGET_COL]].dropna().copy()
-        hist_plot = hist_plot.rename(columns={TARGET_COL: "value"})
-        hist_plot["type"] = "Actual"
-
-        fc_plot = forecast_df.rename(columns={"predicted_discharge": "value"}).copy()
-        fc_plot["type"] = "Forecast"
-
-        combined_plot = pd.concat([hist_plot, fc_plot], ignore_index=True)
-
-        figp = px.line(
-            combined_plot,
-            x="date",
-            y="value",
-            color="location" if location_option == "Both" else None,
-            line_dash="type",
-            title=f"Actual (≤ {ref_date.date()}) vs Forecast (→ {forecast_end_date.date()}) — {location_option}",
-        )
-        figp.update_layout(hovermode="x unified")
-        st.plotly_chart(figp, use_container_width=True)
-
-        # st.subheader("📅 Forecast Table")
-        # st.dataframe(
-        #     forecast_df.sort_values(["location", "date"]).reset_index(drop=True),
-        #     use_container_width=True
-        # )
-
-
-        
-# # ============================================================
-# # EDA
-# # ============================================================
-# with st.expander("🌊 EDA: River Discharge Trend", expanded=True):
-#     if loc_df_ref.empty:
-#         st.warning("No historical data available up to the selected reference date.")
-#     else:
-#         fig = px.line(
-#             loc_df_ref,
-#             x="date",
-#             y=TARGET_COL,
-#             color="location" if location_option == "Both" else None,
-#             title=f"River Discharge — {location_option}",
-#         )
-#         fig.update_layout(hovermode="x unified")
-#         st.plotly_chart(fig, use_container_width=True)
+            figp.update_layout(hovermode="x unified")
+            st.plotly_chart(figp, use_container_width=True)
 
 
 # ============================================================
@@ -430,67 +406,3 @@ with st.expander("⚡ Extreme Rainfall vs Extreme River Discharge", expanded=Tru
                 hovermode="x unified",
             )
             st.plotly_chart(fig_extreme, use_container_width=True)
-
-            # st.subheader("📅 Concurrent Extreme Events")
-            # extreme_both_table = combined[combined["extreme_both"] == 1][[
-            #     "date",
-            #     "location",
-            #     "rain_sum_mm",
-            #     TARGET_COL,
-            #     "extreme_rain",
-            #     "extreme_discharge",
-            #     "extreme_both",
-            # ]].sort_values("date")
-
-            # st.dataframe(extreme_both_table, use_container_width=True)
-            # st.write(f"🔢 Total concurrent extreme events: {len(extreme_both_table)}")
-
-            # corr_val = combined["rain_sum_mm"].corr(combined[TARGET_COL])
-
-            # summary = pd.DataFrame({
-            #     "Metric": [
-            #         "Total Records",
-            #         "Extreme Rainfall Days",
-            #         "Extreme Discharge Days",
-            #         "Concurrent Extreme Days",
-            #         "Rain–Discharge Correlation",
-            #     ],
-            #     "Value": [
-            #         len(combined),
-            #         int(combined["extreme_rain"].sum()),
-            #         int(combined["extreme_discharge"].sum()),
-            #         int(combined["extreme_both"].sum()),
-            #         round(corr_val, 3) if pd.notna(corr_val) else None,
-            #     ]
-            # })
-
-            # st.subheader("📊 Summary")
-            # st.dataframe(summary, use_container_width=True)
-
-            # if location_option == "Both":
-            #     location_summary = (
-            #         combined.groupby("location")[["extreme_rain", "extreme_discharge", "extreme_both"]]
-            #         .sum()
-            #         .reset_index()
-            #         .melt(id_vars="location", var_name="Event Type", value_name="Count")
-            #     )
-
-            #     location_summary["Event Type"] = location_summary["Event Type"].replace({
-            #         "extreme_rain": "Extreme Rain",
-            #         "extreme_discharge": "Extreme Discharge",
-            #         "extreme_both": "Concurrent Both",
-            #     })
-
-            #     fig_bar = px.bar(
-            #         location_summary,
-            #         x="location",
-            #         y="Count",
-            #         color="Event Type",
-            #         barmode="group",
-            #         title="Extreme Event Counts by Location",
-            #     )
-            #     st.plotly_chart(fig_bar, use_container_width=True)
-
-
-
-

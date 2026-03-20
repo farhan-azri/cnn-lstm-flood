@@ -6,9 +6,11 @@ import pandas as pd
 import tensorflow as tf
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.preprocessing import StandardScaler
-from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
-from tensorflow.keras.layers import Conv1D, Dense, Dropout, Input, LSTM
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
+from tensorflow.keras.layers import Conv1D, Dense, Dropout, Input, LSTM, Bidirectional, BatchNormalization
 from tensorflow.keras.models import Sequential
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.losses import Huber
 
 # ============================================================
 # PATHS / CONFIG
@@ -23,7 +25,7 @@ METADATA_PATH = RUN_DIR / "training_metadata.json"
 
 SEQUENCE_LENGTH = 14
 TEST_RATIO = 0.2
-EPOCHS = 40
+EPOCHS = 50 # Increased slightly since we have a dynamic learning rate now
 BATCH_SIZE = 32
 SEED = 42
 TARGET_COL = "river_discharge_m3s"
@@ -63,18 +65,33 @@ def save_scaler_stats(scaler: StandardScaler, out_path: Path):
 def build_model(seq_len: int, n_features: int) -> tf.keras.Model:
     model = Sequential([
         Input(shape=(seq_len, n_features)),
-        Conv1D(filters=64, kernel_size=3, activation="relu"),
+        
+        # 1. Enhanced Feature Extraction
+        Conv1D(filters=64, kernel_size=3, padding="same", activation="relu"),
+        BatchNormalization(),
         Dropout(0.2),
-        LSTM(64),
+        
+        Conv1D(filters=128, kernel_size=3, padding="same", activation="relu"),
+        BatchNormalization(),
         Dropout(0.2),
+        
+        # 2. Bidirectional Sequence Modeling
+        Bidirectional(LSTM(128, return_sequences=True)),
+        Dropout(0.3),
+        Bidirectional(LSTM(64)),
+        Dropout(0.3),
+        
+        # 3. Deeper Dense Block for final regression
+        Dense(64, activation="relu"),
         Dense(32, activation="relu"),
         Dense(1),
     ])
 
+    # 4. Huber Loss for robustness against extreme flood outliers
     model.compile(
-        optimizer="adam",
-        loss="mse",
-        metrics=["mae"],
+        optimizer=Adam(learning_rate=0.001),
+        loss=Huber(delta=1.0), 
+        metrics=["mae", "mse"],
     )
     return model
 
@@ -175,8 +192,17 @@ def train():
     )
     es = EarlyStopping(
         monitor="val_loss",
-        patience=5,
+        patience=7, # Increased patience to allow LR scheduler to kick in
         restore_best_weights=True,
+        verbose=1,
+    )
+    
+    # 5. Learning Rate Scheduler
+    lr_scheduler = ReduceLROnPlateau(
+        monitor="val_loss",
+        factor=0.5,
+        patience=3,
+        min_lr=1e-5,
         verbose=1,
     )
 
@@ -186,7 +212,7 @@ def train():
         validation_data=(X_test, y_test),
         epochs=EPOCHS,
         batch_size=BATCH_SIZE,
-        callbacks=[ckpt, es],
+        callbacks=[ckpt, es, lr_scheduler],
         verbose=1,
     )
 
@@ -196,13 +222,6 @@ def train():
     y_pred = model.predict(X_test, verbose=0).flatten()
     rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
     mae = float(mean_absolute_error(y_test, y_pred))
-
-    # print(f"✅ Saved model: {MODEL_PATH}")
-    # print(f"✅ Saved scaler stats: {SCALER_STATS_PATH}")
-    # print(f"✅ Saved features: {FEATURES_PATH}")
-    # print(f"✅ Saved metadata: {METADATA_PATH}")
-    # print(f"📊 RMSE={rmse:.4f} | MAE={mae:.4f}")
-    # print(f"📚 History keys: {list(history.history.keys())}")
 
     return {
         "rmse": rmse,

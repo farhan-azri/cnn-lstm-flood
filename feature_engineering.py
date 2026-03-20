@@ -1,7 +1,6 @@
 import pandas as pd
 from pathlib import Path
 
-
 def build_features(
     weather_hourly_path: str = "data/weather_hourly.csv",
     flood_daily_path: str = "data/flood_daily.csv",
@@ -10,8 +9,8 @@ def build_features(
 ):
     """
     1) Read hourly weather
-    2) Aggregate to daily per location
-    3) Create daily lag/rolling features
+    2) Aggregate to daily per location (added temp ranges for evaporation proxy)
+    3) Create advanced daily lag/rolling/EMA/delta features
     4) Merge with daily discharge target
     """
 
@@ -34,13 +33,15 @@ def build_features(
     w["location"] = w["location"].astype(str).str.strip()
     f["location"] = f["location"].astype(str).str.strip()
 
-    # --- Daily aggregation from hourly ---
+    # --- 1. Enhanced Daily Aggregation ---
     daily_weather = (
         w.groupby(["location", "date"])
         .agg(
             rain_sum_mm=("rain", "sum"),
             precip_sum_mm=("precipitation", "sum"),
             temp_mean=("temperature_2m", "mean"),
+            temp_max=("temperature_2m", "max"), # NEW: For evaporation proxy
+            temp_min=("temperature_2m", "min"), # NEW: For evaporation proxy
             wind_max=("wind_speed_10m", "max"),
             gust_max=("wind_gusts_10m", "max"),
             rain_max_1h=("rain", "max"),
@@ -49,25 +50,39 @@ def build_features(
         .sort_values(["location", "date"])
     )
 
-    # --- Lag features (daily) ---
+    # --- 2. Hydrological Proxies ---
+    # Diurnal Temperature Range: High range often means clear skies, dry air, and high evaporation (dries the soil).
+    daily_weather["temp_diurnal_range"] = daily_weather["temp_max"] - daily_weather["temp_min"]
+
+    # --- 3. Lags (Past context) ---
     for lag in [1, 2, 3, 7]:
         daily_weather[f"rain_sum_lag_{lag}"] = daily_weather.groupby("location")["rain_sum_mm"].shift(lag)
         daily_weather[f"rain_max1h_lag_{lag}"] = daily_weather.groupby("location")["rain_max_1h"].shift(lag)
 
-    # --- Rolling features ---
-    daily_weather["rain_sum_roll3"] = (
-        daily_weather.groupby("location")["rain_sum_mm"]
-        .rolling(3, min_periods=1).mean()
-        .reset_index(0, drop=True)
+    # --- 4. Cumulative Rolling Sums (Antecedent Moisture) ---
+    # Rolling sums tell the model if the ground is saturated from previous days.
+    for window in [3, 7, 14]:
+        daily_weather[f"rain_sum_roll{window}"] = (
+            daily_weather.groupby("location")["rain_sum_mm"]
+            .transform(lambda x: x.rolling(window, min_periods=1).sum())
+        )
+
+    # --- 5. Exponential Moving Averages (EMA) ---
+    # EMA mimics the natural "recession curve" of a river. Recent rain matters more than rain 5 days ago.
+    for span in [3, 7]:
+        daily_weather[f"rain_ema_{span}"] = (
+            daily_weather.groupby("location")["rain_sum_mm"]
+            .transform(lambda x: x.ewm(span=span, adjust=False).mean())
+        )
+
+    # --- 6. Day-over-Day Changes (Deltas / Spikes) ---
+    # Sudden changes in rainfall (intensity spikes) trigger flash floods.
+    daily_weather["rain_change_1d"] = (
+        daily_weather["rain_sum_mm"] - daily_weather["rain_sum_lag_1"]
     )
-    daily_weather["rain_sum_roll7"] = (
-        daily_weather.groupby("location")["rain_sum_mm"]
-        .rolling(7, min_periods=1).mean()
-        .reset_index(0, drop=True)
-    )
+    daily_weather["rain_change_1d"] = daily_weather["rain_change_1d"].fillna(0) # Fill first day
 
     # --- Merge with discharge (target) ---
-    # Recommended: only merge required column from flood file
     if "river_discharge_m3s" not in f.columns:
         raise ValueError("flood_daily.csv missing required column: river_discharge_m3s")
 
@@ -85,7 +100,11 @@ def build_features(
 
     if verbose:
         print(f"✅ Saved features: {out_path} ({len(merged)} rows)")
+        print(f"🌟 Generated {len(merged.columns) - 3} feature columns for the CNN-LSTM.")
         if len(merged) == 0:
             print("⚠️ Merged dataset is empty — likely date/location mismatch between files.")
 
     return merged
+
+if __name__ == "__main__":
+    build_features()

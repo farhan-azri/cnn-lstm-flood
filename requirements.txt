@@ -1,22 +1,26 @@
 # tensorflow==2.13.0
 # numpy<2
 # protobuf==3.20.3
-# streamlit
-# pandas
-# scikit-learn
-# joblib
-# plotly
-# openmeteo-requests
-# requests-cache
-# retry-requests
-# niquests
-# setuptools
-# wheel
-# h5py
+tensorflow
+numpy
+protobuf
 streamlit
 pandas
-numpy
-plotly
 scikit-learn
-tensorflow==2.21.0
+joblib
+plotly
+openmeteo-requests
+requests-cache
+retry-requests
+niquests
+setuptools
+wheel
 h5py
+
+# streamlit
+# pandas
+# numpy
+# plotly
+# scikit-learn
+# tensorflow==2.21.0
+# h5py
