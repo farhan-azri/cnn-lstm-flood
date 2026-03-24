@@ -1,7 +1,7 @@
 {
   "sequence_length": 14,
   "target_column": "river_discharge_m3s",
-  "feature_count": 23,
+  "feature_count": 27,
   "feature_columns_path": "run/feature_columns.json",
   "scaler_stats_path": "run/scaler_stats.npz",
   "model_path": "run/cnn_lstm_model.keras",
