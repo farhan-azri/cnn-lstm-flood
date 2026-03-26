@@ -5,12 +5,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
 import tensorflow as tf
 
 # ============================================================
-# PATHS
+# CONFIG / PATHS
 # ============================================================
 DATA_PATH = Path("data/features_daily.csv")
 RUN_DIR = Path("run")
@@ -20,389 +19,203 @@ SCALER_STATS_PATH = RUN_DIR / "scaler_stats.npz"
 FEATURES_PATH = RUN_DIR / "feature_columns.json"
 METADATA_PATH = RUN_DIR / "training_metadata.json"
 
-MIN_SEQ_LEN = 7
-
-st.set_page_config(page_title="Flood Dashboard", layout="wide")
-st.title("🌊 Flood Prediction Dashboard")
-
-
-# ============================================================
-# FORECAST HELPERS
-# ============================================================
-def forecast_for_one_location(
-    one_loc_df_ref: pd.DataFrame,
-    model_obj,
-    scaler_stats_obj: dict,
-    feature_columns: list[str],
-    seq_len: int,
-    forecast_until: pd.Timestamp,
-) -> pd.DataFrame:
-    one_loc_df_ref = one_loc_df_ref.sort_values("date").reset_index(drop=True)
-
-    clean = one_loc_df_ref.dropna(subset=feature_columns + [TARGET_COL]).copy()
-    if len(clean) < seq_len:
-        return pd.DataFrame(columns=["date", "predicted_discharge"])
-
-    seq = clean.tail(seq_len).copy()
-    window_features = seq[feature_columns].copy().reset_index(drop=True)
-    last_feature_row = window_features.iloc[-1].copy()
-
-    preds = []
-    cur_date = seq["date"].max()
-
-    while cur_date < forecast_until:
-        X_scaled = apply_saved_standard_scaler(
-            window_features.values,
-            scaler_stats_obj
-        )
-
-        X_scaled = X_scaled.reshape(1, seq_len, len(feature_columns)).astype(np.float32)
-        pred = float(model_obj.predict(X_scaled, verbose=0)[0][0])
-
-        next_date = cur_date + pd.Timedelta(days=1)
-        preds.append({
-            "date": next_date,
-            "predicted_discharge": pred,
-        })
-
-        # Keep same exogenous feature row for recursive forecasting
-        window_features = pd.concat(
-            [window_features.iloc[1:], pd.DataFrame([last_feature_row])],
-            ignore_index=True
-        )
-
-        cur_date = next_date
-
-    return pd.DataFrame(preds)
+st.set_page_config(page_title="Flood Prediction Dashboard", layout="wide")
+st.title("🌊 AI Flood Prediction Dashboard")
 
 # ============================================================
 # HELPERS
 # ============================================================
-def validate_required_files():
+def validate_files():
     required = [DATA_PATH, MODEL_PATH, SCALER_STATS_PATH, FEATURES_PATH, METADATA_PATH]
     missing = [str(p) for p in required if not p.exists()]
     if missing:
         st.error("❌ Missing required files:")
-        for item in missing:
-            st.write(f"- `{item}`")
-        st.info("Run the training pipeline first so the `.keras` model and artifacts are generated.")
+        for m in missing:
+            st.write(f"- {m}")
         st.stop()
 
 
-def apply_saved_standard_scaler(X: np.ndarray, scaler_stats: dict) -> np.ndarray:
-    """
-    Rebuild StandardScaler transform behavior using plain saved arrays.
-    Formula: z = (x - mean) / scale
-    """
-    mean_ = scaler_stats["mean_"]
-    scale_ = scaler_stats["scale_"]
-    with_mean = scaler_stats["with_mean"]
-    with_std = scaler_stats["with_std"]
-
-    X_out = X.astype(np.float32).copy()
-
-    if with_mean:
-        X_out = X_out - mean_
-
-    if with_std:
-        safe_scale = np.where(scale_ == 0, 1.0, scale_)
-        X_out = X_out / safe_scale
-
-    return X_out
+def apply_scaler(X, stats):
+    X = X.astype(np.float32)
+    if stats["with_mean"]:
+        X = X - stats["mean_"]
+    if stats["with_std"]:
+        scale = np.where(stats["scale_"] == 0, 1, stats["scale_"])
+        X = X / scale
+    return X
 
 
 @st.cache_data
 def load_data():
     df = pd.read_csv(DATA_PATH)
-    df["date"] = pd.to_datetime(df["date"], errors="coerce")
-    df = df.dropna(subset=["date"]).copy()
-    df["location"] = df["location"].astype(str).str.strip()
+    df["date"] = pd.to_datetime(df["date"])
+    df["location"] = df["location"].astype(str)
     return df.sort_values(["location", "date"]).reset_index(drop=True)
 
 
-@st.cache_resource(show_spinner="Loading enhanced AI model...")
+@st.cache_resource
 def load_artifacts():
-    try:
-        with open(FEATURES_PATH, "r", encoding="utf-8") as f:
-            feature_cols = json.load(f)
+    model = tf.keras.models.load_model(MODEL_PATH, compile=False)
 
-        with open(METADATA_PATH, "r", encoding="utf-8") as f:
-            metadata = json.load(f)
+    stats_raw = np.load(SCALER_STATS_PATH)
+    scaler_stats = {
+        "mean_": stats_raw["mean_"],
+        "scale_": stats_raw["scale_"],
+        "with_mean": True,
+        "with_std": True,
+    }
 
-        raw = np.load(SCALER_STATS_PATH, allow_pickle=False)
-        scaler_stats = {
-            "mean_": raw["mean_"].astype(np.float32),
-            "scale_": raw["scale_"].astype(np.float32),
-            "var_": raw["var_"].astype(np.float32),
-            "n_features_in_": int(raw["n_features_in_"][0]),
-            "with_mean": bool(raw["with_mean"][0]),
-            "with_std": bool(raw["with_std"][0]),
-        }
+    with open(FEATURES_PATH) as f:
+        features = json.load(f)
 
-        # compile=False ensures we don't need to load the Huber loss or Adam optimizer
-        # making inference faster and preventing custom object mismatch errors.
-        model = tf.keras.models.load_model(MODEL_PATH, compile=False)
+    with open(METADATA_PATH) as f:
+        metadata = json.load(f)
 
-        return model, scaler_stats, feature_cols, metadata
-
-    except Exception as e:
-        st.error(f"Artifact loading failed: {type(e).__name__}: {e}")
-        st.stop()
+    return model, scaler_stats, features, metadata
 
 
-validate_required_files()
+# ============================================================
+# FORECAST FUNCTION (ENHANCED)
+# ============================================================
+def forecast_location(df_loc, model, scaler_stats, feature_cols, seq_len, forecast_days):
+    df_loc = df_loc.dropna().copy()
+    df_loc = df_loc.sort_values("date")
+
+    if len(df_loc) < seq_len:
+        return pd.DataFrame()
+
+    window = df_loc.tail(seq_len).copy()
+    preds = []
+
+    for i in range(forecast_days):
+        X = window[feature_cols].values
+        X = apply_scaler(X, scaler_stats)
+        X = X.reshape(1, seq_len, len(feature_cols))
+
+        raw_pred = float(model.predict(X, verbose=0)[0][0])
+
+        # Smooth prediction
+        prev = window.iloc[-1]["river_discharge_m3s"]
+        pred = max(0, 0.7 * raw_pred + 0.3 * prev)
+
+        next_date = window.iloc[-1]["date"] + pd.Timedelta(days=1)
+
+        # Create next row
+        new_row = window.iloc[-1].copy()
+        new_row["date"] = next_date
+        new_row["river_discharge_m3s"] = pred
+
+        # Update discharge features
+        new_row["discharge_lag_1"] = pred
+        new_row["discharge_delta"] = pred - window.iloc[-1]["river_discharge_m3s"]
+
+        # Update cyclical time
+        doy = next_date.dayofyear
+        new_row["sin_doy"] = np.sin(2 * np.pi * doy / 365)
+        new_row["cos_doy"] = np.cos(2 * np.pi * doy / 365)
+
+        preds.append({"date": next_date, "predicted_discharge": pred})
+
+        window = pd.concat([window.iloc[1:], pd.DataFrame([new_row])])
+
+    return pd.DataFrame(preds)
+
+
+# ============================================================
+# LOAD
+# ============================================================
+validate_files()
 df = load_data()
 model, scaler_stats, feature_cols, metadata = load_artifacts()
 
-MODEL_SEQ_LEN = int(metadata.get("sequence_length", 14))
-TARGET_COL = metadata.get("target_column", "river_discharge_m3s")
-
-if len(feature_cols) != scaler_stats["n_features_in_"]:
-    st.error(
-        "Feature count mismatch between saved feature list and scaler stats. "
-        "Please retrain and regenerate artifacts."
-    )
-    st.stop()
-
+SEQ_LEN = metadata.get("sequence_length", 14)
 
 # ============================================================
 # SIDEBAR
 # ============================================================
-st.sidebar.header("🔎 Filters")
+st.sidebar.header("Settings")
 
-location_option = st.sidebar.selectbox(
+location = st.sidebar.selectbox(
     "Location",
-    ["Both"] + sorted(df["location"].dropna().unique().tolist())
+    ["All"] + sorted(df["location"].unique().tolist())
 )
 
-if location_option == "Both":
-    loc_df = df.copy()
+forecast_days = st.sidebar.slider("Forecast Days", 1, 14, 7)
+
+if location == "All":
+    df_filtered = df.copy()
 else:
-    loc_df = df[df["location"] == location_option].copy()
-
-loc_df = loc_df.sort_values(["location", "date"]).reset_index(drop=True)
-
-if loc_df.empty:
-    st.warning("No data available for the selected location.")
-    st.stop()
-
-min_date = loc_df["date"].min()
-max_date = loc_df["date"].max()
-
-ref_date = st.sidebar.date_input(
-    "Use history up to date",
-    value=max_date.date(),
-    min_value=min_date.date(),
-    max_value=max_date.date(),
-)
-ref_date = pd.to_datetime(ref_date)
-
-default_forecast_end = min(
-    max_date + pd.Timedelta(days=7),
-    ref_date + pd.Timedelta(days=14)
-)
-
-forecast_end_date = st.sidebar.date_input(
-    "Forecast until date",
-    value=default_forecast_end.date(),
-    min_value=(ref_date + pd.Timedelta(days=1)).date(),
-)
-forecast_end_date = pd.to_datetime(forecast_end_date)
-
-loc_df_ref = loc_df[loc_df["date"] <= ref_date].copy()
-
+    df_filtered = df[df["location"] == location].copy()
 
 # ============================================================
-# PREDICTION
+# RUN FORECAST
 # ============================================================
-with st.expander("🚀 Flood Potential Prediction", expanded=True):
-    if forecast_end_date <= ref_date:
-        st.warning("Forecast until date must be after the history date.")
+if st.button("🚀 Run Prediction"):
+    start = time.time()
+
+    all_forecasts = []
+
+    for loc, g in df_filtered.groupby("location"):
+        fc = forecast_location(g, model, scaler_stats, feature_cols, SEQ_LEN, forecast_days)
+        if not fc.empty:
+            fc["location"] = loc
+            all_forecasts.append(fc)
+
+    if not all_forecasts:
+        st.error("Not enough data for prediction.")
         st.stop()
 
-    if MODEL_SEQ_LEN < MIN_SEQ_LEN:
-        st.error(
-            f"Saved model sequence length is {MODEL_SEQ_LEN}, which is below the minimum "
-            f"supported UI threshold of {MIN_SEQ_LEN}."
-        )
-        st.stop()
+    forecast_df = pd.concat(all_forecasts)
 
-    if st.button("Run Forecast", type="primary"):
-        with st.spinner("Running neural network predictions..."):
-            start = time.time()
+    latency = round((time.time() - start) * 1000, 2)
+    st.success(f"Prediction completed in {latency} ms")
 
-            if location_option == "Both":
-                all_forecasts = []
+    # ============================================================
+    # PLOT
+    # ============================================================
+    hist = df_filtered.rename(columns={"river_discharge_m3s": "value"})
+    hist["type"] = "Actual"
 
-                for loc, g in loc_df_ref.groupby("location"):
-                    fc = forecast_for_one_location(
-                        one_loc_df_ref=g,
-                        model_obj=model,
-                        scaler_stats_obj=scaler_stats,
-                        feature_columns=feature_cols,
-                        seq_len=MODEL_SEQ_LEN,
-                        forecast_until=forecast_end_date,
-                    )
+    fc_plot = forecast_df.rename(columns={"predicted_discharge": "value"})
+    fc_plot["type"] = "Forecast"
 
-                    if not fc.empty:
-                        fc["location"] = loc
-                        all_forecasts.append(fc)
+    combined = pd.concat([hist, fc_plot])
 
-                if not all_forecasts:
-                    st.error("No forecasts generated. Check data availability per location.")
-                    st.stop()
-
-                forecast_df = pd.concat(all_forecasts, ignore_index=True)
-
-            else:
-                g = loc_df_ref[loc_df_ref["location"] == location_option].copy()
-
-                forecast_df = forecast_for_one_location(
-                    one_loc_df_ref=g,
-                    model_obj=model,
-                    scaler_stats_obj=scaler_stats,
-                    feature_columns=feature_cols,
-                    seq_len=MODEL_SEQ_LEN,
-                    forecast_until=forecast_end_date,
-                )
-
-                if forecast_df.empty:
-                    st.error(
-                        f"Not enough valid rows for forecasting. Need at least {MODEL_SEQ_LEN} "
-                        f"rows with non-null target and features."
-                    )
-                    st.stop()
-
-                forecast_df["location"] = location_option
-
-            latency_ms = round((time.time() - start) * 1000, 2)
-            horizon_days = int(forecast_df["date"].nunique())
-
-            st.success(f"✅ Forecast completed in {latency_ms} ms | Horizon: {horizon_days} day(s)")
-
-            hist_plot = loc_df_ref[["date", "location", TARGET_COL]].dropna().copy()
-            hist_plot = hist_plot.rename(columns={TARGET_COL: "value"})
-            hist_plot["type"] = "Actual"
-
-            fc_plot = forecast_df.rename(columns={"predicted_discharge": "value"}).copy()
-            fc_plot["type"] = "Forecast"
-
-            combined_plot = pd.concat([hist_plot, fc_plot], ignore_index=True)
-
-            figp = px.line(
-                combined_plot,
-                x="date",
-                y="value",
-                color="location" if location_option == "Both" else None,
-                line_dash="type",
-                title=f"Actual (≤ {ref_date.date()}) vs Forecast (→ {forecast_end_date.date()}) — {location_option}",
-            )
-            figp.update_layout(hovermode="x unified")
-            st.plotly_chart(figp, use_container_width=True)
-
-
-# ============================================================
-# EXTREME EVENT ANALYSIS
-# ============================================================
-with st.expander("⚡ Extreme Rainfall vs Extreme River Discharge", expanded=True):
-    percentile = st.slider(
-        "Extreme event percentile threshold",
-        min_value=80,
-        max_value=99,
-        value=95,
-        step=1
+    fig = px.line(
+        combined,
+        x="date",
+        y="value",
+        color="location",
+        line_dash="type",
+        title="Actual vs Forecast"
     )
 
-    needed_cols = ["date", "location", "rain_sum_mm", TARGET_COL]
-    missing_cols = [c for c in needed_cols if c not in loc_df_ref.columns]
+    st.plotly_chart(fig, use_container_width=True)
 
-    if missing_cols:
-        st.warning(f"Missing columns for extreme event analysis: {missing_cols}")
-    elif loc_df_ref.empty:
-        st.warning("No data available for the selected filters.")
+    # ============================================================
+    # FLOOD RISK
+    # ============================================================
+    st.subheader("🚨 Flood Risk")
+
+    latest = forecast_df["predicted_discharge"].iloc[-1]
+    q90 = df["river_discharge_m3s"].quantile(0.9)
+    q75 = df["river_discharge_m3s"].quantile(0.75)
+
+    if latest >= q90:
+        risk = "🔴 HIGH"
+    elif latest >= q75:
+        risk = "🟠 MEDIUM"
     else:
-        combined = loc_df_ref[needed_cols].dropna().copy()
+        risk = "🟢 LOW"
 
-        if combined.empty:
-            st.warning("No valid rows available after removing null values.")
-        else:
-            rain_threshold = combined["rain_sum_mm"].quantile(percentile / 100)
-            discharge_threshold = combined[TARGET_COL].quantile(percentile / 100)
+    st.metric("Predicted Discharge", f"{latest:.2f}")
+    st.markdown(f"### Risk Level: {risk}")
 
-            combined["extreme_rain"] = np.where(combined["rain_sum_mm"] >= rain_threshold, 1, 0)
-            combined["extreme_discharge"] = np.where(combined[TARGET_COL] >= discharge_threshold, 1, 0)
-            combined["extreme_both"] = np.where(
-                (combined["extreme_rain"] == 1) & (combined["extreme_discharge"] == 1),
-                1,
-                0
-            )
-
-            st.write(f"🌧️ Extreme Rainfall Threshold: ≥ {rain_threshold:.2f} mm")
-            st.write(f"🌊 Extreme River Discharge Threshold: ≥ {discharge_threshold:.2f} m³/s")
-
-            fig_extreme = go.Figure()
-
-            if location_option == "Both":
-                for loc in combined["location"].unique():
-                    sub = combined[combined["location"] == loc]
-                    fig_extreme.add_trace(
-                        go.Scatter(
-                            x=sub["date"],
-                            y=sub[TARGET_COL],
-                            mode="lines",
-                            name=f"{loc} Discharge",
-                            opacity=0.6,
-                        )
-                    )
-            else:
-                fig_extreme.add_trace(
-                    go.Scatter(
-                        x=combined["date"],
-                        y=combined[TARGET_COL],
-                        mode="lines",
-                        name="River Discharge",
-                        opacity=0.6,
-                    )
-                )
-
-            discharge_pts = combined[combined["extreme_discharge"] == 1]
-            rain_pts = combined[combined["extreme_rain"] == 1]
-            both_pts = combined[combined["extreme_both"] == 1]
-
-            fig_extreme.add_trace(
-                go.Scatter(
-                    x=discharge_pts["date"],
-                    y=discharge_pts[TARGET_COL],
-                    mode="markers",
-                    name=f"Extreme Discharge (≥{percentile}th%)",
-                    marker=dict(color="red", size=7),
-                )
-            )
-
-            fig_extreme.add_trace(
-                go.Scatter(
-                    x=rain_pts["date"],
-                    y=rain_pts[TARGET_COL],
-                    mode="markers",
-                    name=f"Extreme Rainfall (≥{percentile}th%)",
-                    marker=dict(color="royalblue", size=7),
-                )
-            )
-
-            fig_extreme.add_trace(
-                go.Scatter(
-                    x=both_pts["date"],
-                    y=both_pts[TARGET_COL],
-                    mode="markers",
-                    name="Concurrent Extreme (Rain + Discharge)",
-                    marker=dict(color="purple", size=10, line=dict(color="black", width=1)),
-                )
-            )
-
-            fig_extreme.update_layout(
-                title=f"Combined Extreme Events: Rainfall vs River Discharge — {location_option}",
-                xaxis_title="Date",
-                yaxis_title="River Discharge (m³/s)",
-                hovermode="x unified",
-            )
-            st.plotly_chart(fig_extreme, use_container_width=True)
+    # ============================================================
+    # MODEL INSIGHT
+    # ============================================================
+    st.subheader("🧠 Model Insight")
+    st.info(
+        "Model focuses heavily on recent rainfall trends, discharge momentum, "
+        "and seasonal patterns (monsoon cycles)."
+    )

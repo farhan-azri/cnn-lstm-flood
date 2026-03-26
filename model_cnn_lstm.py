@@ -7,13 +7,17 @@ import tensorflow as tf
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.preprocessing import StandardScaler
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
-from tensorflow.keras.layers import Conv1D, Dense, Dropout, Input, LSTM, Bidirectional, BatchNormalization
-from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import (
+    Conv1D, Dense, Dropout, Input, LSTM,
+    Bidirectional, BatchNormalization, Concatenate,
+    Softmax, Multiply, GlobalAveragePooling1D
+)
+from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.losses import Huber
 
 # ============================================================
-# PATHS / CONFIG
+# CONFIG
 # ============================================================
 DATA_PATH = "data/features_daily.csv"
 RUN_DIR = Path("run")
@@ -25,20 +29,20 @@ METADATA_PATH = RUN_DIR / "training_metadata.json"
 
 SEQUENCE_LENGTH = 14
 TEST_RATIO = 0.2
-EPOCHS = 50 # Increased slightly since we have a dynamic learning rate now
+EPOCHS = 50
 BATCH_SIZE = 32
 SEED = 42
+
 TARGET_COL = "river_discharge_m3s"
 DROP_COLS = ["date", "location", TARGET_COL]
 
 np.random.seed(SEED)
 tf.random.set_seed(SEED)
 
-
 # ============================================================
 # HELPERS
 # ============================================================
-def create_sequences(X: np.ndarray, y: np.ndarray, seq_len: int):
+def create_sequences(X, y, seq_len):
     Xs, ys = [], []
     for i in range(len(X) - seq_len):
         Xs.append(X[i:i + seq_len])
@@ -46,53 +50,64 @@ def create_sequences(X: np.ndarray, y: np.ndarray, seq_len: int):
     return np.array(Xs), np.array(ys)
 
 
-def save_scaler_stats(scaler: StandardScaler, out_path: Path):
-    """
-    Save only the scaler numeric attributes as plain NumPy arrays.
-    This avoids pickle/joblib environment issues in deployment.
-    """
+def save_scaler_stats(scaler, path):
     np.savez(
-        out_path,
+        path,
         mean_=scaler.mean_,
         scale_=scaler.scale_,
         var_=scaler.var_,
-        n_features_in_=np.array([scaler.n_features_in_], dtype=np.int64),
-        with_mean=np.array([int(scaler.with_mean)], dtype=np.int64),
-        with_std=np.array([int(scaler.with_std)], dtype=np.int64),
+        n_features_in_=np.array([scaler.n_features_in_])
     )
 
 
-def build_model(seq_len: int, n_features: int) -> tf.keras.Model:
-    model = Sequential([
-        Input(shape=(seq_len, n_features)),
-        
-        # 1. Enhanced Feature Extraction
-        Conv1D(filters=64, kernel_size=3, padding="same", activation="relu"),
-        BatchNormalization(),
-        Dropout(0.2),
-        
-        Conv1D(filters=128, kernel_size=3, padding="same", activation="relu"),
-        BatchNormalization(),
-        Dropout(0.2),
-        
-        # 2. Bidirectional Sequence Modeling
-        Bidirectional(LSTM(128, return_sequences=True)),
-        Dropout(0.3),
-        Bidirectional(LSTM(64)),
-        Dropout(0.3),
-        
-        # 3. Deeper Dense Block for final regression
-        Dense(64, activation="relu"),
-        Dense(32, activation="relu"),
-        Dense(1),
-    ])
+def attention_block(inputs):
+    score = Dense(1, activation="tanh")(inputs)
+    weights = Softmax(axis=1)(score)
+    context = Multiply()([inputs, weights])
+    context = GlobalAveragePooling1D()(context)
+    return context
 
-    # 4. Huber Loss for robustness against extreme flood outliers
+
+# ============================================================
+# MODEL
+# ============================================================
+def build_model(seq_len, n_features):
+    inputs = Input(shape=(seq_len, n_features))
+
+    # Multi-scale CNN
+    conv1 = Conv1D(64, 2, padding="same", activation="relu")(inputs)
+    conv2 = Conv1D(64, 3, padding="same", activation="relu")(inputs)
+    conv3 = Conv1D(64, 5, padding="same", activation="relu")(inputs)
+
+    x = Concatenate()([conv1, conv2, conv3])
+    x = BatchNormalization()(x)
+    x = Dropout(0.2)(x)
+
+    # LSTM
+    x = Bidirectional(LSTM(128, return_sequences=True))(x)
+    x = Dropout(0.3)(x)
+
+    x = Bidirectional(LSTM(64, return_sequences=True))(x)
+    x = Dropout(0.3)(x)
+
+    # Attention (FIXED)
+    x = attention_block(x)
+
+    # Dense
+    x = Dense(64, activation="relu")(x)
+    x = Dropout(0.2)(x)
+
+    x = Dense(32, activation="relu")(x)
+    outputs = Dense(1)(x)
+
+    model = Model(inputs, outputs)
+
     model.compile(
-        optimizer=Adam(learning_rate=0.001),
-        loss=Huber(delta=1.0), 
+        optimizer=Adam(learning_rate=0.0005, clipnorm=1.0),
+        loss=Huber(),
         metrics=["mae", "mse"],
     )
+
     return model
 
 
@@ -100,138 +115,138 @@ def build_model(seq_len: int, n_features: int) -> tf.keras.Model:
 # TRAINING
 # ============================================================
 def train():
-    RUN_DIR.mkdir(parents=True, exist_ok=True)
+    RUN_DIR.mkdir(exist_ok=True)
 
     df = pd.read_csv(DATA_PATH)
+
+    # -------------------------
+    # Basic cleaning
+    # -------------------------
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
-    df = df.dropna(subset=["date"]).copy()
-    df["location"] = df["location"].astype(str).str.strip()
+    df = df.dropna(subset=["date"])
     df = df.sort_values(["location", "date"]).reset_index(drop=True)
 
-    if TARGET_COL not in df.columns:
-        raise ValueError(f"Target column '{TARGET_COL}' not found in dataset.")
+    # -------------------------
+    # Discharge Features 🔥
+    # -------------------------
+    df["discharge_lag_1"] = df.groupby("location")[TARGET_COL].shift(1)
+    df["discharge_lag_3"] = df.groupby("location")[TARGET_COL].shift(3)
 
+    df["discharge_delta"] = df[TARGET_COL] - df["discharge_lag_1"]
+    df["discharge_delta"] = df["discharge_delta"].fillna(0)
+
+    # -------------------------
+    # Cyclical Time Features 🔥
+    # -------------------------
+    df["dayofyear"] = df["date"].dt.dayofyear
+    df["sin_doy"] = np.sin(2 * np.pi * df["dayofyear"] / 365)
+    df["cos_doy"] = np.cos(2 * np.pi * df["dayofyear"] / 365)
+
+    # -------------------------
+    # Feature selection
+    # -------------------------
     feature_cols = [c for c in df.columns if c not in DROP_COLS]
-    if not feature_cols:
-        raise ValueError("No feature columns found after excluding date/location/target.")
 
-    # Drop rows with missing target or missing features
-    model_df = df.dropna(subset=[TARGET_COL] + feature_cols).copy()
+    model_df = df.dropna(subset=[TARGET_COL] + feature_cols)
 
-    if model_df.empty:
-        raise ValueError("No valid rows left after dropping missing target/features.")
-
-    # Fit one scaler across all rows for consistency
+    # -------------------------
+    # Scaling
+    # -------------------------
     scaler = StandardScaler()
-    scaler.fit(model_df[feature_cols].values)
+    scaler.fit(model_df[feature_cols])
 
     X_all, y_all = [], []
-    location_sequence_counts = {}
 
-    # Build sequences per location to avoid crossing location boundaries
     for loc, g in model_df.groupby("location"):
-        g = g.sort_values("date").reset_index(drop=True)
+        g = g.sort_values("date")
 
-        X_scaled = scaler.transform(g[feature_cols].values)
-        y = g[TARGET_COL].values.astype(np.float32)
+        X_scaled = scaler.transform(g[feature_cols])
+        y = g[TARGET_COL].values
 
         X_seq, y_seq = create_sequences(X_scaled, y, SEQUENCE_LENGTH)
-        location_sequence_counts[loc] = int(len(X_seq))
 
-        if len(X_seq) == 0:
-            continue
+        if len(X_seq) > 0:
+            X_all.append(X_seq)
+            y_all.append(y_seq)
 
-        X_all.append(X_seq)
-        y_all.append(y_seq)
+    X = np.concatenate(X_all).astype(np.float32)
+    y = np.concatenate(y_all).astype(np.float32)
 
-    if not X_all:
-        raise ValueError(
-            "No sequences were created. Check data size per location and SEQUENCE_LENGTH."
-        )
+    # -------------------------
+    # Shuffle + Split
+    # -------------------------
+    idx = np.arange(len(X))
+    np.random.shuffle(idx)
 
-    X_seq = np.concatenate(X_all, axis=0).astype(np.float32)
-    y_seq = np.concatenate(y_all, axis=0).astype(np.float32)
+    X = X[idx]
+    y = y[idx]
 
-    split_idx = int(len(X_seq) * (1 - TEST_RATIO))
-    if split_idx <= 0 or split_idx >= len(X_seq):
-        raise ValueError("Train/test split produced an invalid partition.")
+    split = int(len(X) * (1 - TEST_RATIO))
 
-    X_train, X_test = X_seq[:split_idx], X_seq[split_idx:]
-    y_train, y_test = y_seq[:split_idx], y_seq[split_idx:]
+    X_train, X_test = X[:split], X[split:]
+    y_train, y_test = y[:split], y[split:]
 
-    # Save plain, deployment-friendly artifacts
+    # -------------------------
+    # Save artifacts
+    # -------------------------
     save_scaler_stats(scaler, SCALER_STATS_PATH)
 
-    with open(FEATURES_PATH, "w", encoding="utf-8") as f:
-        json.dump(feature_cols, f, ensure_ascii=False, indent=2)
+    with open(FEATURES_PATH, "w") as f:
+        json.dump(feature_cols, f, indent=2)
 
     metadata = {
         "sequence_length": SEQUENCE_LENGTH,
-        "target_column": TARGET_COL,
         "feature_count": len(feature_cols),
-        "feature_columns_path": str(FEATURES_PATH),
-        "scaler_stats_path": str(SCALER_STATS_PATH),
-        "model_path": str(MODEL_PATH),
-        "rows_used": int(len(model_df)),
-        "total_sequences": int(len(X_seq)),
-        "train_sequences": int(len(X_train)),
-        "test_sequences": int(len(X_test)),
-        "location_sequence_counts": location_sequence_counts,
-        "seed": SEED,
+        "rows": len(model_df),
+        "samples": len(X),
     }
-    with open(METADATA_PATH, "w", encoding="utf-8") as f:
-        json.dump(metadata, f, ensure_ascii=False, indent=2)
 
+    with open(METADATA_PATH, "w") as f:
+        json.dump(metadata, f, indent=2)
+
+    # -------------------------
+    # Train model
+    # -------------------------
     model = build_model(SEQUENCE_LENGTH, len(feature_cols))
 
-    ckpt = ModelCheckpoint(
-        filepath=str(MODEL_PATH),
-        monitor="val_loss",
-        save_best_only=True,
-        verbose=1,
-    )
-    es = EarlyStopping(
-        monitor="val_loss",
-        patience=7, # Increased patience to allow LR scheduler to kick in
-        restore_best_weights=True,
-        verbose=1,
-    )
-    
-    # 5. Learning Rate Scheduler
-    lr_scheduler = ReduceLROnPlateau(
-        monitor="val_loss",
-        factor=0.5,
-        patience=3,
-        min_lr=1e-5,
-        verbose=1,
-    )
+    callbacks = [
+        ModelCheckpoint(MODEL_PATH, save_best_only=True, monitor="val_loss"),
+        EarlyStopping(patience=7, restore_best_weights=True),
+        ReduceLROnPlateau(factor=0.5, patience=3, min_lr=1e-5),
+    ]
 
-    history = model.fit(
+    model.fit(
         X_train,
         y_train,
         validation_data=(X_test, y_test),
         epochs=EPOCHS,
         batch_size=BATCH_SIZE,
-        callbacks=[ckpt, es, lr_scheduler],
+        callbacks=callbacks,
         verbose=1,
     )
 
-    # Ensure final saved model exists in .keras format
     model.save(MODEL_PATH)
 
-    y_pred = model.predict(X_test, verbose=0).flatten()
-    rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
-    mae = float(mean_absolute_error(y_test, y_pred))
+    # -------------------------
+    # Evaluation
+    # -------------------------
+    y_pred = model.predict(X_test).flatten()
+
+    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+    mae = mean_absolute_error(y_test, y_pred)
+
+    print(f"\n✅ RMSE: {rmse:.4f}")
+    print(f"✅ MAE : {mae:.4f}")
 
     return {
         "rmse": rmse,
         "mae": mae,
-        "model_path": str(MODEL_PATH),
-        "scaler_stats_path": str(SCALER_STATS_PATH),
-        "features_path": str(FEATURES_PATH),
-        "metadata_path": str(METADATA_PATH),
+        "model_path": str(MODEL_PATH)
     }
 
 
+# ============================================================
+# RUN
+# ============================================================
 if __name__ == "__main__":
     train()
