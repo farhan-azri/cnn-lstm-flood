@@ -12,7 +12,7 @@ def main():
     parser = argparse.ArgumentParser(description="Hourly rainfall + daily discharge pipeline")
     parser.add_argument("--step", choices=["all", "extract", "features", "train"], default="all")
     parser.add_argument("--start_date", default="2010-01-01")
-    parser.add_argument("--end_date", default="2025-12-31")
+    parser.add_argument("--end_date", default="2026-03-01")
 
     parser.add_argument("--weather_hourly_path", default="data/weather_hourly.csv")
     parser.add_argument("--flood_daily_path", default="data/flood_daily.csv")

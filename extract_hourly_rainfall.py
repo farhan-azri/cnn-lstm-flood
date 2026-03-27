@@ -14,7 +14,7 @@ def _client():
 
 def extract_hourly_rainfall(
     start_date: str = "2010-01-01",
-    end_date: str = "2025-12-31",
+    end_date: str = "2026-04-30",
     save_csv: bool = True,
     out_path: str = "data/weather_hourly.csv",
 ):

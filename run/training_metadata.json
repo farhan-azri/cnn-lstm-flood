@@ -1,6 +1,17 @@
 {
   "sequence_length": 14,
-  "feature_count": 33,
-  "rows": 11666,
-  "samples": 11638
+  "target_column": "river_discharge_m3s",
+  "feature_count": 27,
+  "feature_columns_path": "run/feature_columns.json",
+  "scaler_stats_path": "run/scaler_stats.npz",
+  "model_path": "run/cnn_lstm_model.keras",
+  "rows_used": 11792,
+  "total_sequences": 11764,
+  "train_sequences": 9411,
+  "test_sequences": 2353,
+  "location_sequence_counts": {
+    "Klang": 5882,
+    "Petaling": 5882
+  },
+  "seed": 42
 }

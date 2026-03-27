@@ -13,7 +13,7 @@ def get_openmeteo_client():
 
 def extract_weather_hourly_data(
     start_date: str = "2010-01-01",
-    end_date: str = "2025-12-31",
+    end_date: str = "2026-04-30",
     save_csv: bool = True,
 ):
     """
@@ -92,7 +92,7 @@ def extract_weather_hourly_data(
 
 def extract_flood_hourly_data(
     start_date: str = "2010-01-01",
-    end_date: str = "2025-12-31",
+    end_date: str = "2026-04-30",
     save_csv: bool = True,
 ):
     """

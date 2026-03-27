@@ -25,11 +25,5 @@
   "is_monsoon",
   "heavy_rain",
   "high_wind",
-  "runoff_ratio_7d",
-  "discharge_lag_1",
-  "discharge_lag_3",
-  "discharge_delta",
-  "dayofyear",
-  "sin_doy",
-  "cos_doy"
+  "runoff_ratio_7d"
 ]
