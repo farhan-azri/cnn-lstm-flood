@@ -5,6 +5,7 @@ from pathlib import Path
 
 from extract_hourly_rainfall import extract_hourly_rainfall
 from extract_daily_river_discharge import extract_daily_river_discharge
+from extract_weather_forecast import extract_seasonal_hourly
 from feature_engineering import build_features
 
 
@@ -15,6 +16,8 @@ def main():
     parser.add_argument("--end_date", default="2026-03-01")
 
     parser.add_argument("--weather_hourly_path", default="data/weather_hourly.csv")
+    parser.add_argument("--weather_forecast_path", default="data/weather_forecast_hourly.csv")
+    parser.add_argument("--weather_ensemble_path", default="data/weather_ensemble_forecast_hourly.csv")
     parser.add_argument("--flood_daily_path", default="data/flood_daily.csv")
     parser.add_argument("--features_out_path", default="data/features_daily.csv")
 
@@ -26,6 +29,16 @@ def main():
             start_date=args.start_date,
             end_date=args.end_date,
             out_path=args.weather_hourly_path
+        )
+
+        print("📥 Extracting seasonal weather forecast...")
+        extract_seasonal_hourly(
+            out_path=args.weather_forecast_path
+        )
+        
+        print("📥 Extracting ensemble weather forecast...")
+        extract_seasonal_hourly(
+            out_path=args.weather_ensemble_path
         )
 
         print("📥 Extracting daily river discharge...")
