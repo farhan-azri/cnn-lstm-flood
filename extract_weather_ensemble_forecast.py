@@ -19,18 +19,20 @@ def _client():
 # ============================================================
 # MAIN FUNCTION
 # ============================================================
-def extract_seasonal_hourly(
+def extract_ensemble_hourly(
     forecast_days: int = 30,
+    models: str = "ukmo_global_ensemble_20km",
     save_csv: bool = True,
     out_path: str = "data/weather_ensemble_forecast_hourly.csv",
 ):
     """
-    Extract HOURLY seasonal forecast data from Open-Meteo API.
+    Extract HOURLY ensemble forecast data from Open-Meteo API.
     Saves: data/weather_ensemble_forecast_hourly.csv
     """
 
     openmeteo = _client()
-    url = "https://customer-ensemble-api.open-meteo.com/v1/ensemble"
+    # url = "https://customer-ensemble-api.open-meteo.com/v1/ensemble" # PAID customer
+    url = "https://ensemble-api.open-meteo.com/v1/ensemble" # PAID customer
 
     locations = [
         {"name": "Petaling", "latitude": 3.107260, "longitude": 101.606710},
@@ -52,7 +54,8 @@ def extract_seasonal_hourly(
             "latitude": loc["latitude"],
             "longitude": loc["longitude"],
             "hourly": hourly_vars,
-            "forecast_days": forecast_days,
+            "models": models,
+            "forecast_days": forecast_days
         }
 
         responses = openmeteo.weather_api(url, params=params)
@@ -117,5 +120,5 @@ def extract_seasonal_hourly(
 # RUN
 # ============================================================
 if __name__ == "__main__":
-    df = extract_seasonal_hourly()
+    df = extract_ensemble_hourly()
     print(df.head())

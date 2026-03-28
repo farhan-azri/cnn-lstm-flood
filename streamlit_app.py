@@ -302,9 +302,10 @@ with st.expander("🚀 Flood Potential Prediction", expanded=True):
 
 
 # ============================================================
-# EXTREME EVENT ANALYSIS
+# EXTREME EVENT ANALYSIS (ENHANCED)
 # ============================================================
 with st.expander("⚡ Extreme Rainfall vs Extreme River Discharge", expanded=True):
+
     percentile = st.slider(
         "Extreme event percentile threshold",
         min_value=80,
@@ -313,96 +314,92 @@ with st.expander("⚡ Extreme Rainfall vs Extreme River Discharge", expanded=Tru
         step=1
     )
 
-    needed_cols = ["date", "location", "rain_sum_mm", TARGET_COL]
-    missing_cols = [c for c in needed_cols if c not in loc_df_ref.columns]
+    # -------------------------
+    # Historical data
+    # -------------------------
+    hist_df = df[df["data_type"] == "historical"].copy()
 
-    if missing_cols:
-        st.warning(f"Missing columns for extreme event analysis: {missing_cols}")
-    elif loc_df_ref.empty:
-        st.warning("No data available for the selected filters.")
+    hist_df = hist_df[["date", "location", "rain_sum_mm", TARGET_COL]].dropna()
+    hist_df["data_type"] = "historical"
+
+    # -------------------------
+    # Forecast data (if exists)
+    # -------------------------
+    if "forecast_df" in locals() and not forecast_df.empty:
+        fc_df = forecast_df.copy()
+        fc_df = fc_df.rename(columns={"predicted_discharge": TARGET_COL})
+
+        # merge rainfall forecast from main df
+        rain_fc = df[df["data_type"] == "forecast"][["date", "location", "rain_sum_mm"]]
+
+        fc_df = pd.merge(fc_df, rain_fc, on=["date", "location"], how="left")
+        fc_df["data_type"] = "forecast"
+
+        combined = pd.concat([hist_df, fc_df], ignore_index=True)
+
     else:
-        combined = loc_df_ref[needed_cols].dropna().copy()
+        combined = hist_df.copy()
 
-        if combined.empty:
-            st.warning("No valid rows available after removing null values.")
-        else:
-            rain_threshold = combined["rain_sum_mm"].quantile(percentile / 100)
-            discharge_threshold = combined[TARGET_COL].quantile(percentile / 100)
+    if combined.empty:
+        st.warning("No data available for analysis.")
+        st.stop()
 
-            combined["extreme_rain"] = np.where(combined["rain_sum_mm"] >= rain_threshold, 1, 0)
-            combined["extreme_discharge"] = np.where(combined[TARGET_COL] >= discharge_threshold, 1, 0)
-            combined["extreme_both"] = np.where(
-                (combined["extreme_rain"] == 1) & (combined["extreme_discharge"] == 1),
-                1,
-                0
-            )
+    # -------------------------
+    # Compute thresholds (based on historical only)
+    # -------------------------
+    rain_threshold = hist_df["rain_sum_mm"].quantile(percentile / 100)
+    discharge_threshold = hist_df[TARGET_COL].quantile(percentile / 100)
 
-            st.write(f"🌧️ Extreme Rainfall Threshold: ≥ {rain_threshold:.2f} mm")
-            st.write(f"🌊 Extreme River Discharge Threshold: ≥ {discharge_threshold:.2f} m³/s")
+    combined["extreme_rain"] = (combined["rain_sum_mm"] >= rain_threshold).astype(int)
+    combined["extreme_discharge"] = (combined[TARGET_COL] >= discharge_threshold).astype(int)
+    combined["extreme_both"] = (
+        (combined["extreme_rain"] == 1) &
+        (combined["extreme_discharge"] == 1)
+    ).astype(int)
 
-            fig_extreme = go.Figure()
+    st.write(f"🌧️ Rain Threshold: ≥ {rain_threshold:.2f} mm")
+    st.write(f"🌊 Discharge Threshold: ≥ {discharge_threshold:.2f} m³/s")
 
-            if location_option == "Both":
-                for loc in combined["location"].unique():
-                    sub = combined[combined["location"] == loc]
-                    fig_extreme.add_trace(
-                        go.Scatter(
-                            x=sub["date"],
-                            y=sub[TARGET_COL],
-                            mode="lines",
-                            name=f"{loc} Discharge",
-                            opacity=0.6,
-                        )
-                    )
-            else:
-                fig_extreme.add_trace(
-                    go.Scatter(
-                        x=combined["date"],
-                        y=combined[TARGET_COL],
-                        mode="lines",
-                        name="River Discharge",
-                        opacity=0.6,
-                    )
-                )
+    # -------------------------
+    # Plot
+    # -------------------------
+    fig_extreme = go.Figure()
 
-            discharge_pts = combined[combined["extreme_discharge"] == 1]
-            rain_pts = combined[combined["extreme_rain"] == 1]
-            both_pts = combined[combined["extreme_both"] == 1]
+    for dtype in combined["data_type"].unique():
+        sub_type = combined[combined["data_type"] == dtype]
+
+        for loc in sub_type["location"].unique():
+            sub = sub_type[sub_type["location"] == loc]
 
             fig_extreme.add_trace(
                 go.Scatter(
-                    x=discharge_pts["date"],
-                    y=discharge_pts[TARGET_COL],
-                    mode="markers",
-                    name=f"Extreme Discharge (≥{percentile}th%)",
-                    marker=dict(color="red", size=7),
+                    x=sub["date"],
+                    y=sub[TARGET_COL],
+                    mode="lines",
+                    name=f"{loc} ({dtype})",
+                    opacity=0.6,
+                    line=dict(dash="solid" if dtype == "historical" else "dash"),
                 )
             )
 
-            fig_extreme.add_trace(
-                go.Scatter(
-                    x=rain_pts["date"],
-                    y=rain_pts[TARGET_COL],
-                    mode="markers",
-                    name=f"Extreme Rainfall (≥{percentile}th%)",
-                    marker=dict(color="royalblue", size=7),
-                )
-            )
+    # Extreme points
+    both_pts = combined[combined["extreme_both"] == 1]
 
-            fig_extreme.add_trace(
-                go.Scatter(
-                    x=both_pts["date"],
-                    y=both_pts[TARGET_COL],
-                    mode="markers",
-                    name="Concurrent Extreme (Rain + Discharge)",
-                    marker=dict(color="purple", size=10, line=dict(color="black", width=1)),
-                )
-            )
+    fig_extreme.add_trace(
+        go.Scatter(
+            x=both_pts["date"],
+            y=both_pts[TARGET_COL],
+            mode="markers",
+            name="Extreme (Rain + Discharge)",
+            marker=dict(color="purple", size=10, line=dict(color="black", width=1)),
+        )
+    )
 
-            fig_extreme.update_layout(
-                title=f"Combined Extreme Events: Rainfall vs River Discharge — {location_option}",
-                xaxis_title="Date",
-                yaxis_title="River Discharge (m³/s)",
-                hovermode="x unified",
-            )
-            st.plotly_chart(fig_extreme, use_container_width=True)
+    fig_extreme.update_layout(
+        title=f"Combined Extreme Events (Historical + Forecast) — {location_option}",
+        xaxis_title="Date",
+        yaxis_title="River Discharge (m³/s)",
+        hovermode="x unified",
+    )
+
+    st.plotly_chart(fig_extreme, use_container_width=True)

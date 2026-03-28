@@ -6,6 +6,7 @@ from pathlib import Path
 from extract_hourly_rainfall import extract_hourly_rainfall
 from extract_daily_river_discharge import extract_daily_river_discharge
 from extract_weather_forecast import extract_seasonal_hourly
+from extract_weather_ensemble_forecast import extract_ensemble_hourly
 from feature_engineering import build_features
 
 
@@ -37,7 +38,7 @@ def main():
         )
         
         print("📥 Extracting ensemble weather forecast...")
-        extract_seasonal_hourly(
+        extract_ensemble_hourly(
             out_path=args.weather_ensemble_path
         )
 

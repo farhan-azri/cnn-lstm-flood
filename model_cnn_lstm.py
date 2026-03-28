@@ -103,6 +103,10 @@ def train():
     RUN_DIR.mkdir(parents=True, exist_ok=True)
 
     df = pd.read_csv(DATA_PATH)
+
+    # =========================
+    # Basic cleaning
+    # =========================
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df = df.dropna(subset=["date"]).copy()
     df["location"] = df["location"].astype(str).str.strip()
@@ -111,24 +115,45 @@ def train():
     if TARGET_COL not in df.columns:
         raise ValueError(f"Target column '{TARGET_COL}' not found in dataset.")
 
-    feature_cols = [c for c in df.columns if c not in DROP_COLS]
-    if not feature_cols:
-        raise ValueError("No feature columns found after excluding date/location/target.")
+    # =========================
+    # 🔥 IMPORTANT: Use ONLY historical data
+    # =========================
+    if "data_type" not in df.columns:
+        raise ValueError("Column 'data_type' not found. Please regenerate features.")
 
-    # Drop rows with missing target or missing features
-    model_df = df.dropna(subset=[TARGET_COL] + feature_cols).copy()
+    model_df = df[df["data_type"] == "historical"].copy()
+
+    # =========================
+    # Feature selection
+    # =========================
+    feature_cols = [
+        c for c in model_df.columns
+        if c not in DROP_COLS + ["data_type"]  # exclude data_type from model
+    ]
+
+    if not feature_cols:
+        raise ValueError("No feature columns found after excluding identifiers.")
+
+    # =========================
+    # Drop missing
+    # =========================
+    model_df = model_df.dropna(subset=[TARGET_COL] + feature_cols)
 
     if model_df.empty:
-        raise ValueError("No valid rows left after dropping missing target/features.")
+        raise ValueError("No valid rows left after filtering historical data.")
 
-    # Fit one scaler across all rows for consistency
+    # =========================
+    # Scaling
+    # =========================
     scaler = StandardScaler()
     scaler.fit(model_df[feature_cols].values)
 
     X_all, y_all = [], []
     location_sequence_counts = {}
 
-    # Build sequences per location to avoid crossing location boundaries
+    # =========================
+    # Sequence creation per location
+    # =========================
     for loc, g in model_df.groupby("location"):
         g = g.sort_values("date").reset_index(drop=True)
 
@@ -145,93 +170,79 @@ def train():
         y_all.append(y_seq)
 
     if not X_all:
-        raise ValueError(
-            "No sequences were created. Check data size per location and SEQUENCE_LENGTH."
-        )
+        raise ValueError("No sequences created. Check SEQUENCE_LENGTH or data size.")
 
-    X_seq = np.concatenate(X_all, axis=0).astype(np.float32)
-    y_seq = np.concatenate(y_all, axis=0).astype(np.float32)
+    X_seq = np.concatenate(X_all).astype(np.float32)
+    y_seq = np.concatenate(y_all).astype(np.float32)
 
+    # =========================
+    # Train/Test split
+    # =========================
     split_idx = int(len(X_seq) * (1 - TEST_RATIO))
-    if split_idx <= 0 or split_idx >= len(X_seq):
-        raise ValueError("Train/test split produced an invalid partition.")
 
     X_train, X_test = X_seq[:split_idx], X_seq[split_idx:]
     y_train, y_test = y_seq[:split_idx], y_seq[split_idx:]
 
-    # Save plain, deployment-friendly artifacts
+    # =========================
+    # Save artifacts
+    # =========================
     save_scaler_stats(scaler, SCALER_STATS_PATH)
 
     with open(FEATURES_PATH, "w", encoding="utf-8") as f:
-        json.dump(feature_cols, f, ensure_ascii=False, indent=2)
+        json.dump(feature_cols, f, indent=2)
 
     metadata = {
         "sequence_length": SEQUENCE_LENGTH,
         "target_column": TARGET_COL,
         "feature_count": len(feature_cols),
-        "feature_columns_path": str(FEATURES_PATH),
-        "scaler_stats_path": str(SCALER_STATS_PATH),
-        "model_path": str(MODEL_PATH),
         "rows_used": int(len(model_df)),
         "total_sequences": int(len(X_seq)),
         "train_sequences": int(len(X_train)),
         "test_sequences": int(len(X_test)),
         "location_sequence_counts": location_sequence_counts,
-        "seed": SEED,
     }
-    with open(METADATA_PATH, "w", encoding="utf-8") as f:
-        json.dump(metadata, f, ensure_ascii=False, indent=2)
 
+    with open(METADATA_PATH, "w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2)
+
+    # =========================
+    # Train model
+    # =========================
     model = build_model(SEQUENCE_LENGTH, len(feature_cols))
 
-    ckpt = ModelCheckpoint(
-        filepath=str(MODEL_PATH),
-        monitor="val_loss",
-        save_best_only=True,
-        verbose=1,
-    )
-    es = EarlyStopping(
-        monitor="val_loss",
-        patience=7, # Increased patience to allow LR scheduler to kick in
-        restore_best_weights=True,
-        verbose=1,
-    )
-    
-    # 5. Learning Rate Scheduler
-    lr_scheduler = ReduceLROnPlateau(
-        monitor="val_loss",
-        factor=0.5,
-        patience=3,
-        min_lr=1e-5,
-        verbose=1,
-    )
+    callbacks = [
+        ModelCheckpoint(MODEL_PATH, save_best_only=True, monitor="val_loss"),
+        EarlyStopping(patience=7, restore_best_weights=True),
+        ReduceLROnPlateau(factor=0.5, patience=3, min_lr=1e-5),
+    ]
 
-    history = model.fit(
+    model.fit(
         X_train,
         y_train,
         validation_data=(X_test, y_test),
         epochs=EPOCHS,
         batch_size=BATCH_SIZE,
-        callbacks=[ckpt, es, lr_scheduler],
+        callbacks=callbacks,
         verbose=1,
     )
 
-    # Ensure final saved model exists in .keras format
     model.save(MODEL_PATH)
 
-    y_pred = model.predict(X_test, verbose=0).flatten()
+    # =========================
+    # Evaluation
+    # =========================
+    y_pred = model.predict(X_test).flatten()
+
     rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
     mae = float(mean_absolute_error(y_test, y_pred))
+
+    print(f"\n✅ RMSE: {rmse:.4f}")
+    print(f"✅ MAE : {mae:.4f}")
 
     return {
         "rmse": rmse,
         "mae": mae,
-        "model_path": str(MODEL_PATH),
-        "scaler_stats_path": str(SCALER_STATS_PATH),
-        "features_path": str(FEATURES_PATH),
-        "metadata_path": str(METADATA_PATH),
     }
-
 
 if __name__ == "__main__":
     train()
