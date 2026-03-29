@@ -325,30 +325,37 @@ with st.expander("⚡ Extreme Rainfall vs Extreme River Discharge", expanded=Tru
     # -------------------------
     # Forecast data (if exists)
     # -------------------------
-    if "forecast_df" in locals() and not forecast_df.empty:
-        fc_df = forecast_df.copy()
-        fc_df = fc_df.rename(columns={"predicted_discharge": TARGET_COL})
+    pred_df = df[df["data_type"] == "forecast"].copy()
 
-        # merge rainfall forecast from main df
-        rain_fc = df[df["data_type"] == "forecast"][["date", "location", "rain_sum_mm"]]
+    pred_df = pred_df[["date", "location", "rain_sum_mm", TARGET_COL]].dropna()
+    pred_df["data_type"] = "forecast"
 
-        fc_df = pd.merge(fc_df, rain_fc, on=["date", "location"], how="left")
-        fc_df["data_type"] = "forecast"
+    combined = df[["date", "location", "rain_sum_mm", TARGET_COL, "data_type"]].dropna().copy()
 
-        combined = pd.concat([hist_df, fc_df], ignore_index=True)
+    # if "forecast_df" in locals() and not forecast_df.empty:
+    #     fc_df = forecast_df.copy()
+    #     fc_df = fc_df.rename(columns={"predicted_discharge": TARGET_COL})
 
-    else:
-        combined = hist_df.copy()
+    #     # merge rainfall forecast from main df
+    #     rain_fc = df[df["data_type"] == "forecast"][["date", "location", "rain_sum_mm"]]
 
-    if combined.empty:
-        st.warning("No data available for analysis.")
-        st.stop()
+    #     fc_df = pd.merge(fc_df, rain_fc, on=["date", "location"], how="left")
+    #     fc_df["data_type"] = "forecast"
+
+    #     combined = pd.concat([hist_df, fc_df], ignore_index=True)
+
+    # else:
+    #     combined = hist_df.copy()
+
+    # if combined.empty:
+    #     st.warning("No data available for analysis.")
+    #     st.stop()
 
     # -------------------------
     # Compute thresholds (based on historical only)
     # -------------------------
-    rain_threshold = hist_df["rain_sum_mm"].quantile(percentile / 100)
-    discharge_threshold = hist_df[TARGET_COL].quantile(percentile / 100)
+    rain_threshold = df["rain_sum_mm"].quantile(percentile / 100)
+    discharge_threshold = df[TARGET_COL].quantile(percentile / 100)
 
     combined["extreme_rain"] = (combined["rain_sum_mm"] >= rain_threshold).astype(int)
     combined["extreme_discharge"] = (combined[TARGET_COL] >= discharge_threshold).astype(int)
