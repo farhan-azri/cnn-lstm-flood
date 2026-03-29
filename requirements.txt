@@ -16,6 +16,7 @@ niquests
 setuptools
 wheel
 h5py
+matplotlib
 
 # streamlit
 # pandas

@@ -1,13 +1,6 @@
 [
   "rain_sum_mm",
-  "precip_sum_mm",
-  "temp_mean",
-  "temp_max",
-  "temp_min",
-  "wind_max",
-  "gust_max",
   "rain_max_1h",
-  "temp_diurnal_range",
   "rain_sum_lag_1",
   "rain_sum_lag_2",
   "rain_sum_lag_3",
@@ -24,6 +17,5 @@
   "month",
   "is_monsoon",
   "heavy_rain",
-  "high_wind",
   "runoff_ratio_7d"
 ]

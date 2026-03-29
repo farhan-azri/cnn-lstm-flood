@@ -61,12 +61,12 @@ def build_features(
         weather_all.groupby(["location", "date", "data_type"])
         .agg(
             rain_sum_mm=("rain", "sum"),
-            precip_sum_mm=("precipitation", "sum"),
-            temp_mean=("temperature_2m", "mean"),
-            temp_max=("temperature_2m", "max"),
-            temp_min=("temperature_2m", "min"),
-            wind_max=("wind_speed_10m", "max"),
-            gust_max=("wind_gusts_10m", "max"),
+            # precip_sum_mm=("precipitation", "sum"),
+            # temp_mean=("temperature_2m", "mean"),
+            # temp_max=("temperature_2m", "max"),
+            # temp_min=("temperature_2m", "min"),
+            # wind_max=("wind_speed_10m", "max"),
+            # gust_max=("wind_gusts_10m", "max"),
             rain_max_1h=("rain", "max"),
         )
         .reset_index()
@@ -76,9 +76,9 @@ def build_features(
     # ============================================================
     # 5) Hydrological features (UNCHANGED)
     # ============================================================
-    daily_weather["temp_diurnal_range"] = (
-        daily_weather["temp_max"] - daily_weather["temp_min"]
-    )
+    # daily_weather["temp_diurnal_range"] = (
+    #     daily_weather["temp_max"] - daily_weather["temp_min"]
+    # )
 
     for lag in [1, 2, 3, 7]:
         daily_weather[f"rain_sum_lag_{lag}"] = (
@@ -126,7 +126,7 @@ def build_features(
     merged["is_monsoon"] = merged["month"].isin([10,11,12,1,2,3]).astype(int)
 
     merged["heavy_rain"] = (merged["rain_sum_mm"] > 50).astype(int)
-    merged["high_wind"] = (merged["wind_max"] > 10).astype(int)
+    # merged["high_wind"] = (merged["wind_max"] > 10).astype(int)
 
     merged["runoff_ratio_7d"] = merged["river_discharge_m3s"] / (
         merged["rain_sum_roll7"] + 1e-6

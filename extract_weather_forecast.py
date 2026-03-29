@@ -39,10 +39,10 @@ def extract_seasonal_hourly(
 
     hourly_vars = [
         "rain",
-        "temperature_2m",
-        "precipitation",
-        "wind_speed_10m",
-        "wind_gusts_10m",
+        # "temperature_2m",
+        # "precipitation",
+        # "wind_speed_10m",
+        # "wind_gusts_10m",
     ]
 
     frames = []

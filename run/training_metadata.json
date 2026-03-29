@@ -1,7 +1,7 @@
 {
   "sequence_length": 14,
   "target_column": "river_discharge_m3s",
-  "feature_count": 27,
+  "feature_count": 19,
   "rows_used": 11792,
   "total_sequences": 11764,
   "train_sequences": 9411,

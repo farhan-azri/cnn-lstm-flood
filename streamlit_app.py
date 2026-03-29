@@ -8,6 +8,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 import tensorflow as tf
+import matplotlib.pyplot as plt
 
 # ============================================================
 # PATHS
@@ -410,3 +411,242 @@ with st.expander("⚡ Extreme Rainfall vs Extreme River Discharge", expanded=Tru
     )
 
     st.plotly_chart(fig_extreme, use_container_width=True)
+
+# # ============================================================
+# # 🌧️ HOURLY RAINFALL (LINE) vs 🌊 DAILY DISCHARGE (BAR)
+# # ============================================================
+# with st.expander("🌧️ Hourly Rainfall vs 🌊 Daily River Discharge", expanded=True):
+
+#     weather_path = Path("data/weather_hourly.csv")
+#     flood_path = Path("data/flood_daily.csv")
+
+#     if not weather_path.exists() or not flood_path.exists():
+#         st.warning("Missing weather_hourly.csv or flood_daily.csv")
+#     else:
+#         # -------------------------
+#         # Load data
+#         # -------------------------
+#         df_weather = pd.read_csv(weather_path)
+#         df_flood = pd.read_csv(flood_path)
+
+#         # -------------------------
+#         # Preprocess Weather (Hourly)
+#         # -------------------------
+#         df_weather["datetime"] = pd.to_datetime(df_weather["datetime"])
+#         df_weather["location"] = df_weather["location"].astype(str).str.strip()
+#         df_weather["date"] = df_weather["datetime"].dt.floor("D")
+
+#         # -------------------------
+#         # Preprocess Flood (Daily)
+#         # -------------------------
+#         df_flood["datetime"] = pd.to_datetime(df_flood["date"])
+#         df_flood["location"] = df_flood["location"].astype(str).str.strip()
+#         df_flood["date"] = df_flood["datetime"].dt.floor("D")
+
+#         # -------------------------
+#         # Merge (broadcast daily → hourly)
+#         # -------------------------
+#         df = pd.merge(
+#             df_weather,
+#             df_flood[["date", "location", "river_discharge_m3s"]],
+#             on=["date", "location"],
+#             how="left"
+#         )
+
+#         # Fill missing discharge if needed
+#         df["river_discharge_m3s"] = df["river_discharge_m3s"].fillna(0)
+
+#         # -------------------------
+#         # Filter location
+#         # -------------------------
+#         if location_option != "Both":
+#             df = df[df["location"] == location_option]
+
+#         if df.empty:
+#             st.warning("No data available for selected location.")
+#         else:
+#             # -------------------------
+#             # Plot
+#             # -------------------------
+#             fig_combo = go.Figure()
+
+#             # 🌧️ Hourly Rainfall (LINE)
+#             fig_combo.add_trace(
+#                 go.Scatter(
+#                     x=df["datetime"],
+#                     y=df["rain"],
+#                     name="Hourly Rainfall (mm)",
+#                     mode="lines",
+#                     line=dict(width=2),
+#                     yaxis="y1"
+#                 )
+#             )
+
+#             # 🌊 Daily River Discharge (BAR)
+#             fig_combo.add_trace(
+#                 go.Bar(
+#                     x=df["datetime"],  # align to hourly axis
+#                     y=df["river_discharge_m3s"],
+#                     name="Daily River Discharge (m³/s)",
+#                     opacity=0.3,
+#                     yaxis="y2"
+#                 )
+#             )
+
+#             # -------------------------
+#             # Layout
+#             # -------------------------
+#             fig_combo.update_layout(
+#                 title=f"Hourly Rainfall vs Daily River Discharge — {location_option}",
+#                 xaxis=dict(title="Datetime"),
+
+#                 yaxis=dict(
+#                     title="Rainfall (mm)",
+#                     side="left"
+#                 ),
+
+#                 yaxis2=dict(
+#                     title="Discharge (m³/s)",
+#                     overlaying="y",
+#                     side="right"
+#                 ),
+
+#                 hovermode="x unified",
+#                 legend=dict(orientation="h", y=1.1),
+#                 bargap=0
+#             )
+
+#             st.plotly_chart(fig_combo, use_container_width=True)
+
+# # ============================================================
+# # 🌧️ HOURLY RAINFALL (LINE) vs 🌊 DAILY DISCHARGE (BAR)
+# # ============================================================
+# with st.expander("🌧️ Hourly Rainfall vs 🌊 Daily River Discharge", expanded=True):
+
+#     combined_path = Path("data/combine_daily_river_weather_hourly.csv")
+
+#     if not combined_path.exists():
+#         st.warning("Missing combine_daily_river_weather_hourly.csv")
+#     else:
+#         df = pd.read_csv(combined_path)
+
+#         # -------------------------
+#         # Preprocess
+#         # -------------------------
+#         df["datetime"] = pd.to_datetime(df["datetime"])
+#         df["location"] = df["location"].astype(str).str.strip()
+#         df["date"] = df["datetime"].dt.floor("D")
+
+#         # -------------------------
+#         # Filter location
+#         # -------------------------
+#         if location_option != "Both":
+#             df = df[df["location"] == location_option]
+
+#         if df.empty:
+#             st.warning("No data available for selected location.")
+#         else:
+#             # -------------------------
+#             # Plot
+#             # -------------------------
+#             fig_combo = go.Figure()
+
+#             # 🌧️ Hourly Rainfall (LINE)
+#             fig_combo.add_trace(
+#                 go.Scatter(
+#                     x=df["datetime"],
+#                     y=df["rain"],
+#                     name="Hourly Rainfall (mm)",
+#                     mode="lines",
+#                     line=dict(width=2),
+#                     yaxis="y1"
+#                 )
+#             )
+
+#             # 🌊 Daily River Discharge (BAR aligned to hourly)
+#             fig_combo.add_trace(
+#                 go.Bar(
+#                     x=df["datetime"],  # 👈 use hourly x-axis
+#                     y=df["river_discharge_m3s"],
+#                     name="Daily River Discharge (m³/s)",
+#                     opacity=0.3,
+#                     yaxis="y2"
+#                 )
+#             )
+
+#             # -------------------------
+#             # Layout
+#             # -------------------------
+#             fig_combo.update_layout(
+#                 title=f"Hourly Rainfall vs Daily River Discharge — {location_option}",
+#                 xaxis=dict(title="Datetime"),
+
+#                 yaxis=dict(
+#                     title="Rainfall (mm)",
+#                     side="left"
+#                 ),
+
+#                 yaxis2=dict(
+#                     title="Discharge (m³/s)",
+#                     overlaying="y",
+#                     side="right"
+#                 ),
+
+#                 hovermode="x unified",
+#                 legend=dict(orientation="h", y=1.1),
+#                 bargap=0  # 👈 makes bars continuous
+#             )
+
+#             st.plotly_chart(fig_combo, use_container_width=True)
+
+# # # ============================================================
+# # # 🌧️ HOURLY RAINFALL ONLY (LINE CHART)
+# # # ============================================================
+# # with st.expander("🌧️ Hourly Rainfall", expanded=True):
+
+# #     combined_path = Path("data/combine_daily_river_weather_hourly.csv")
+
+# #     if not combined_path.exists():
+# #         st.warning("Missing combine_daily_river_weather_hourly.csv")
+# #     else:
+# #         df = pd.read_csv(combined_path)
+
+# #         # -------------------------
+# #         # Preprocess
+# #         # -------------------------
+# #         df["datetime"] = pd.to_datetime(df["datetime"])
+# #         df["location"] = df["location"].astype(str).str.strip()
+
+# #         # -------------------------
+# #         # Filter location
+# #         # -------------------------
+# #         if location_option != "Both":
+# #             df = df[df["location"] == location_option]
+
+# #         if df.empty:
+# #             st.warning("No data available for selected location.")
+# #         else:
+# #             # -------------------------
+# #             # Plot (Rainfall only)
+# #             # -------------------------
+# #             fig_rain = go.Figure()
+
+# #             fig_rain.add_trace(
+# #                 go.Scatter(
+# #                     x=df["datetime"],
+# #                     y=df["rain"],
+# #                     name="Hourly Rainfall (mm)",
+# #                     mode="lines",
+# #                     line=dict(width=2)
+# #                 )
+# #             )
+
+# #             fig_rain.update_layout(
+# #                 title=f"Hourly Rainfall — {location_option}",
+# #                 xaxis=dict(title="Datetime"),
+# #                 yaxis=dict(title="Rainfall (mm)"),
+# #                 hovermode="x unified",
+# #                 legend=dict(orientation="h", y=1.1)
+# #             )
+
+# #             st.plotly_chart(fig_rain, use_container_width=True)

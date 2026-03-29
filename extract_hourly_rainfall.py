@@ -31,11 +31,11 @@ def extract_hourly_rainfall(
     ]
 
     hourly_vars = [
-        "temperature_2m",
+        # "temperature_2m",
         "rain",
-        "precipitation",
-        "wind_speed_10m",
-        "wind_gusts_10m",
+        # "precipitation",
+        # "wind_speed_10m",
+        # "wind_gusts_10m",
     ]
     # Order must match Variables(i) below.
 
@@ -65,11 +65,11 @@ def extract_hourly_rainfall(
         df = pd.DataFrame(
             {
                 "datetime": dt,
-                "temperature_2m": hourly.Variables(0).ValuesAsNumpy(),
-                "rain": hourly.Variables(1).ValuesAsNumpy(),
-                "precipitation": hourly.Variables(2).ValuesAsNumpy(),
-                "wind_speed_10m": hourly.Variables(3).ValuesAsNumpy(),
-                "wind_gusts_10m": hourly.Variables(4).ValuesAsNumpy(),
+                "rain": hourly.Variables(0).ValuesAsNumpy(),
+                # "temperature_2m": hourly.Variables(1).ValuesAsNumpy(),
+                # "precipitation": hourly.Variables(2).ValuesAsNumpy(),
+                # "wind_speed_10m": hourly.Variables(3).ValuesAsNumpy(),
+                # "wind_gusts_10m": hourly.Variables(4).ValuesAsNumpy(),
                 "location": loc["name"],
             }
         )
