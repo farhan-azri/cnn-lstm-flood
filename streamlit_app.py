@@ -213,93 +213,93 @@ forecast_end_date = pd.to_datetime(forecast_end_date)
 loc_df_ref = loc_df[loc_df["date"] <= ref_date].copy()
 
 
-# ============================================================
-# PREDICTION
-# ============================================================
-with st.expander("🚀 Flood Potential Prediction", expanded=True):
-    if forecast_end_date <= ref_date:
-        st.warning("Forecast until date must be after the history date.")
-        st.stop()
+# # ============================================================
+# # PREDICTION
+# # ============================================================
+# with st.expander("🚀 Flood Potential Prediction", expanded=True):
+#     if forecast_end_date <= ref_date:
+#         st.warning("Forecast until date must be after the history date.")
+#         st.stop()
 
-    if MODEL_SEQ_LEN < MIN_SEQ_LEN:
-        st.error(
-            f"Saved model sequence length is {MODEL_SEQ_LEN}, which is below the minimum "
-            f"supported UI threshold of {MIN_SEQ_LEN}."
-        )
-        st.stop()
+#     if MODEL_SEQ_LEN < MIN_SEQ_LEN:
+#         st.error(
+#             f"Saved model sequence length is {MODEL_SEQ_LEN}, which is below the minimum "
+#             f"supported UI threshold of {MIN_SEQ_LEN}."
+#         )
+#         st.stop()
 
-    if st.button("Run Forecast", type="primary"):
-        with st.spinner("Running neural network predictions..."):
-            start = time.time()
+#     if st.button("Run Forecast", type="primary"):
+#         with st.spinner("Running neural network predictions..."):
+#             start = time.time()
 
-            if location_option == "Both":
-                all_forecasts = []
+#             if location_option == "Both":
+#                 all_forecasts = []
 
-                for loc, g in loc_df_ref.groupby("location"):
-                    fc = forecast_for_one_location(
-                        one_loc_df_ref=g,
-                        model_obj=model,
-                        scaler_stats_obj=scaler_stats,
-                        feature_columns=feature_cols,
-                        seq_len=MODEL_SEQ_LEN,
-                        forecast_until=forecast_end_date,
-                    )
+#                 for loc, g in loc_df_ref.groupby("location"):
+#                     fc = forecast_for_one_location(
+#                         one_loc_df_ref=g,
+#                         model_obj=model,
+#                         scaler_stats_obj=scaler_stats,
+#                         feature_columns=feature_cols,
+#                         seq_len=MODEL_SEQ_LEN,
+#                         forecast_until=forecast_end_date,
+#                     )
 
-                    if not fc.empty:
-                        fc["location"] = loc
-                        all_forecasts.append(fc)
+#                     if not fc.empty:
+#                         fc["location"] = loc
+#                         all_forecasts.append(fc)
 
-                if not all_forecasts:
-                    st.error("No forecasts generated. Check data availability per location.")
-                    st.stop()
+#                 if not all_forecasts:
+#                     st.error("No forecasts generated. Check data availability per location.")
+#                     st.stop()
 
-                forecast_df = pd.concat(all_forecasts, ignore_index=True)
+#                 forecast_df = pd.concat(all_forecasts, ignore_index=True)
 
-            else:
-                g = loc_df_ref[loc_df_ref["location"] == location_option].copy()
+#             else:
+#                 g = loc_df_ref[loc_df_ref["location"] == location_option].copy()
 
-                forecast_df = forecast_for_one_location(
-                    one_loc_df_ref=g,
-                    model_obj=model,
-                    scaler_stats_obj=scaler_stats,
-                    feature_columns=feature_cols,
-                    seq_len=MODEL_SEQ_LEN,
-                    forecast_until=forecast_end_date,
-                )
+#                 forecast_df = forecast_for_one_location(
+#                     one_loc_df_ref=g,
+#                     model_obj=model,
+#                     scaler_stats_obj=scaler_stats,
+#                     feature_columns=feature_cols,
+#                     seq_len=MODEL_SEQ_LEN,
+#                     forecast_until=forecast_end_date,
+#                 )
 
-                if forecast_df.empty:
-                    st.error(
-                        f"Not enough valid rows for forecasting. Need at least {MODEL_SEQ_LEN} "
-                        f"rows with non-null target and features."
-                    )
-                    st.stop()
+#                 if forecast_df.empty:
+#                     st.error(
+#                         f"Not enough valid rows for forecasting. Need at least {MODEL_SEQ_LEN} "
+#                         f"rows with non-null target and features."
+#                     )
+#                     st.stop()
 
-                forecast_df["location"] = location_option
+#                 forecast_df["location"] = location_option
 
-            latency_ms = round((time.time() - start) * 1000, 2)
-            horizon_days = int(forecast_df["date"].nunique())
+#             latency_ms = round((time.time() - start) * 1000, 2)
+#             horizon_days = int(forecast_df["date"].nunique())
 
-            st.success(f"✅ Forecast completed in {latency_ms} ms | Horizon: {horizon_days} day(s)")
+#             st.success(f"✅ Forecast completed in {latency_ms} ms | Horizon: {horizon_days} day(s)")
 
-            hist_plot = loc_df_ref[["date", "location", TARGET_COL]].dropna().copy()
-            hist_plot = hist_plot.rename(columns={TARGET_COL: "value"})
-            hist_plot["type"] = "Actual"
+#             hist_plot = loc_df_ref[["date", "location", TARGET_COL]].dropna().copy()
+#             hist_plot = hist_plot.rename(columns={TARGET_COL: "value"})
+#             hist_plot["type"] = "Actual"
 
-            fc_plot = forecast_df.rename(columns={"predicted_discharge": "value"}).copy()
-            fc_plot["type"] = "Forecast"
+#             fc_plot = forecast_df.rename(columns={"predicted_discharge": "value"}).copy()
+#             fc_plot["type"] = "Forecast"
 
-            combined_plot = pd.concat([hist_plot, fc_plot], ignore_index=True)
+#             combined_plot = pd.concat([hist_plot, fc_plot], ignore_index=True)
 
-            figp = px.line(
-                combined_plot,
-                x="date",
-                y="value",
-                color="location" if location_option == "Both" else None,
-                line_dash="type",
-                title=f"Actual (≤ {ref_date.date()}) vs Forecast (→ {forecast_end_date.date()}) — {location_option}",
-            )
-            figp.update_layout(hovermode="x unified")
-            st.plotly_chart(figp, use_container_width=True)
+#             figp = px.line(
+#                 combined_plot,
+#                 x="date",
+#                 y="value",
+#                 color="location" if location_option == "Both" else None,
+#                 line_dash="type",
+#                 title=f"Actual (≤ {ref_date.date()}) vs Forecast (→ {forecast_end_date.date()}) — {location_option}",
+#             )
+#             figp.update_layout(hovermode="x unified")
+#             st.plotly_chart(figp, use_container_width=True)
 
 
 # ============================================================
@@ -412,111 +412,103 @@ with st.expander("⚡ Extreme Rainfall vs Extreme River Discharge", expanded=Tru
 
     st.plotly_chart(fig_extreme, use_container_width=True)
 
-# # ============================================================
-# # 🌧️ HOURLY RAINFALL (LINE) vs 🌊 DAILY DISCHARGE (BAR)
-# # ============================================================
-# with st.expander("🌧️ Hourly Rainfall vs 🌊 Daily River Discharge", expanded=True):
+# ============================================================
+# 🌧️ HOURLY RAINFALL (LINE) vs 🌊 DAILY DISCHARGE (BAR)
+# ============================================================
+with st.expander("🌧️ Hourly Rainfall vs 🌊 Daily River Discharge", expanded=True):
 
-#     weather_path = Path("data/weather_hourly.csv")
-#     flood_path = Path("data/flood_daily.csv")
+    weather_path = Path("data/weather_hourly.csv")
+    flood_path = Path("data/flood_daily.csv")
 
-#     if not weather_path.exists() or not flood_path.exists():
-#         st.warning("Missing weather_hourly.csv or flood_daily.csv")
-#     else:
-#         # -------------------------
-#         # Load data
-#         # -------------------------
-#         df_weather = pd.read_csv(weather_path)
-#         df_flood = pd.read_csv(flood_path)
+    if not weather_path.exists() or not flood_path.exists():
+        st.warning("Missing weather_hourly.csv or flood_daily.csv")
+    else:
+        # -------------------------
+        # Load data
+        # -------------------------
+        df_weather = pd.read_csv(weather_path)
+        df_flood = pd.read_csv(flood_path)
 
-#         # -------------------------
-#         # Preprocess Weather (Hourly)
-#         # -------------------------
-#         df_weather["datetime"] = pd.to_datetime(df_weather["datetime"])
-#         df_weather["location"] = df_weather["location"].astype(str).str.strip()
-#         df_weather["date"] = df_weather["datetime"].dt.floor("D")
+        # -------------------------
+        # Preprocess Weather (Hourly)
+        # -------------------------
+        df_weather["datetime"] = pd.to_datetime(df_weather["datetime"])
+        df_weather["location"] = df_weather["location"].astype(str).str.strip()
 
-#         # -------------------------
-#         # Preprocess Flood (Daily)
-#         # -------------------------
-#         df_flood["datetime"] = pd.to_datetime(df_flood["date"])
-#         df_flood["location"] = df_flood["location"].astype(str).str.strip()
-#         df_flood["date"] = df_flood["datetime"].dt.floor("D")
+        # ✅ FILTER YEAR 2025 (HOURLY)
+        df_weather = df_weather[df_weather["datetime"].dt.year == 2025]
 
-#         # -------------------------
-#         # Merge (broadcast daily → hourly)
-#         # -------------------------
-#         df = pd.merge(
-#             df_weather,
-#             df_flood[["date", "location", "river_discharge_m3s"]],
-#             on=["date", "location"],
-#             how="left"
-#         )
+        df_weather["date"] = df_weather["datetime"].dt.floor("D")
 
-#         # Fill missing discharge if needed
-#         df["river_discharge_m3s"] = df["river_discharge_m3s"].fillna(0)
+        # -------------------------
+        # Preprocess Flood (Daily)
+        # -------------------------
+        df_flood["datetime"] = pd.to_datetime(df_flood["date"])
+        df_flood["location"] = df_flood["location"].astype(str).str.strip()
 
-#         # -------------------------
-#         # Filter location
-#         # -------------------------
-#         if location_option != "Both":
-#             df = df[df["location"] == location_option]
+        # ✅ FILTER YEAR 2025 (DAILY)
+        df_flood = df_flood[df_flood["datetime"].dt.year == 2025]
 
-#         if df.empty:
-#             st.warning("No data available for selected location.")
-#         else:
-#             # -------------------------
-#             # Plot
-#             # -------------------------
-#             fig_combo = go.Figure()
+        df_flood["date"] = df_flood["datetime"].dt.floor("D")
 
-#             # 🌧️ Hourly Rainfall (LINE)
-#             fig_combo.add_trace(
-#                 go.Scatter(
-#                     x=df["datetime"],
-#                     y=df["rain"],
-#                     name="Hourly Rainfall (mm)",
-#                     mode="lines",
-#                     line=dict(width=2),
-#                     yaxis="y1"
-#                 )
-#             )
+        # -------------------------
+        # Merge (broadcast daily → hourly)
+        # -------------------------
+        df = pd.merge(
+            df_weather,
+            df_flood[["date", "location", "river_discharge_m3s"]],
+            on=["date", "location"],
+            how="left"
+        )
 
-#             # 🌊 Daily River Discharge (BAR)
-#             fig_combo.add_trace(
-#                 go.Bar(
-#                     x=df["datetime"],  # align to hourly axis
-#                     y=df["river_discharge_m3s"],
-#                     name="Daily River Discharge (m³/s)",
-#                     opacity=0.3,
-#                     yaxis="y2"
-#                 )
-#             )
+        df["river_discharge_m3s"] = df["river_discharge_m3s"].fillna(0)
 
-#             # -------------------------
-#             # Layout
-#             # -------------------------
-#             fig_combo.update_layout(
-#                 title=f"Hourly Rainfall vs Daily River Discharge — {location_option}",
-#                 xaxis=dict(title="Datetime"),
+        # -------------------------
+        # Filter location
+        # -------------------------
+        if location_option != "Both":
+            df = df[df["location"] == location_option]
 
-#                 yaxis=dict(
-#                     title="Rainfall (mm)",
-#                     side="left"
-#                 ),
+        if df.empty:
+            st.warning("No data available for selected location in 2025.")
+        else:
+            # -------------------------
+            # Plot
+            # -------------------------
+            fig_combo = go.Figure()
 
-#                 yaxis2=dict(
-#                     title="Discharge (m³/s)",
-#                     overlaying="y",
-#                     side="right"
-#                 ),
+            fig_combo.add_trace(
+                go.Scatter(
+                    x=df["datetime"],
+                    y=df["rain"],
+                    name="Hourly Rainfall (mm)",
+                    mode="lines",
+                    line=dict(width=2),
+                    yaxis="y1"
+                )
+            )
 
-#                 hovermode="x unified",
-#                 legend=dict(orientation="h", y=1.1),
-#                 bargap=0
-#             )
+            fig_combo.add_trace(
+                go.Bar(
+                    x=df["datetime"],
+                    y=df["river_discharge_m3s"],
+                    name="Daily River Discharge (m³/s)",
+                    opacity=0.3,
+                    yaxis="y2"
+                )
+            )
 
-#             st.plotly_chart(fig_combo, use_container_width=True)
+            fig_combo.update_layout(
+                title=f"Hourly Rainfall vs Daily River Discharge (2025) — {location_option}",
+                xaxis=dict(title="Datetime"),
+                yaxis=dict(title="Rainfall (mm)", side="left"),
+                yaxis2=dict(title="Discharge (m³/s)", overlaying="y", side="right"),
+                hovermode="x unified",
+                legend=dict(orientation="h", y=1.1),
+                bargap=0
+            )
+
+            st.plotly_chart(fig_combo, use_container_width=True)
 
 # # ============================================================
 # # 🌧️ HOURLY RAINFALL (LINE) vs 🌊 DAILY DISCHARGE (BAR)
