@@ -43,6 +43,39 @@ if loc_df.empty:
     st.warning("No data available for the selected location.")
     st.stop()
 
+
+# ============================================================
+# SIDEBAR FILTER (DATE RANGE)
+# ============================================================
+st.sidebar.header("📅 Date Filter")
+
+min_date = "2025-01-01" #df["date"].min()
+max_date = df["date"].max()
+
+date_range = st.sidebar.date_input(
+    "Select Date Range",
+    value=(min_date, max_date),
+    min_value=min_date,
+    max_value=max_date
+)
+
+# Handle single date selection edge case
+if isinstance(date_range, tuple):
+    start_date, end_date = date_range
+else:
+    start_date = end_date = date_range
+
+start_date = pd.to_datetime(start_date)
+end_date = pd.to_datetime(end_date)
+
+# Apply filter
+loc_df = df[(df["date"] >= start_date) & (df["date"] <= end_date)].copy()
+
+if loc_df.empty:
+    st.warning("No data available for selected date range.")
+    st.stop()
+
+
 # ============================================================
 # ⚡ EXTREME EVENT ANALYSIS
 # ============================================================
@@ -129,13 +162,13 @@ with st.expander("🌧️ Hourly Rainfall vs 🌊 Daily River Discharge", expand
         # Weather preprocessing
         df_weather["datetime"] = pd.to_datetime(df_weather["datetime"])
         df_weather["location"] = df_weather["location"].astype(str).str.strip()
-        df_weather = df_weather[df_weather["datetime"].dt.year == 2025]
+        df_weather = df_weather[(df_weather["datetime"].dt.date >= start_date.date()) & (df_weather["datetime"].dt.date <= end_date.date())]
         df_weather["date"] = df_weather["datetime"].dt.floor("D")
 
         # Flood preprocessing
         df_flood["datetime"] = pd.to_datetime(df_flood["date"])
         df_flood["location"] = df_flood["location"].astype(str).str.strip()
-        df_flood = df_flood[df_flood["datetime"].dt.year == 2025]
+        df_flood = df_flood[(df_flood["datetime"].dt.date >= start_date.date()) & (df_flood["datetime"].dt.date <= end_date.date())]
         df_flood["date"] = df_flood["datetime"].dt.floor("D")
 
         # Merge
