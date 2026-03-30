@@ -27,89 +27,90 @@ st.set_page_config(page_title="Flood Dashboard", layout="wide")
 st.title("🌊 Flood Prediction Dashboard")
 
 
-# ============================================================
-# FORECAST HELPERS
-# ============================================================
-def forecast_for_one_location(
-    one_loc_df_ref: pd.DataFrame,
-    model_obj,
-    scaler_stats_obj: dict,
-    feature_columns: list[str],
-    seq_len: int,
-    forecast_until: pd.Timestamp,
-) -> pd.DataFrame:
-    one_loc_df_ref = one_loc_df_ref.sort_values("date").reset_index(drop=True)
+# # ============================================================
+# # FORECAST HELPERS
+# # ============================================================
+# def forecast_for_one_location(
+#     one_loc_df_ref: pd.DataFrame,
+#     model_obj,
+#     scaler_stats_obj: dict,
+#     feature_columns: list[str],
+#     seq_len: int,
+#     forecast_until: pd.Timestamp,
+# ) -> pd.DataFrame:
+#     one_loc_df_ref = one_loc_df_ref.sort_values("date").reset_index(drop=True)
 
-    clean = one_loc_df_ref.dropna(subset=feature_columns + [TARGET_COL]).copy()
-    if len(clean) < seq_len:
-        return pd.DataFrame(columns=["date", "predicted_discharge"])
+#     clean = one_loc_df_ref.dropna(subset=feature_columns + [TARGET_COL]).copy()
+#     if len(clean) < seq_len:
+#         return pd.DataFrame(columns=["date", "predicted_discharge"])
 
-    seq = clean.tail(seq_len).copy()
-    window_features = seq[feature_columns].copy().reset_index(drop=True)
-    last_feature_row = window_features.iloc[-1].copy()
+#     seq = clean.tail(seq_len).copy()
+#     window_features = seq[feature_columns].copy().reset_index(drop=True)
+#     last_feature_row = window_features.iloc[-1].copy()
 
-    preds = []
-    cur_date = seq["date"].max()
+#     preds = []
+#     cur_date = seq["date"].max()
 
-    while cur_date < forecast_until:
-        X_scaled = apply_saved_standard_scaler(
-            window_features.values,
-            scaler_stats_obj
-        )
+#     while cur_date < forecast_until:
+#         X_scaled = apply_saved_standard_scaler(
+#             window_features.values,
+#             scaler_stats_obj
+#         )
 
-        X_scaled = X_scaled.reshape(1, seq_len, len(feature_columns)).astype(np.float32)
-        pred = float(model_obj.predict(X_scaled, verbose=0)[0][0])
+#         X_scaled = X_scaled.reshape(1, seq_len, len(feature_columns)).astype(np.float32)
+#         pred = float(model_obj.predict(X_scaled, verbose=0)[0][0])
 
-        next_date = cur_date + pd.Timedelta(days=1)
-        preds.append({
-            "date": next_date,
-            "predicted_discharge": pred,
-        })
+#         next_date = cur_date + pd.Timedelta(days=1)
+#         preds.append({
+#             "date": next_date,
+#             "predicted_discharge": pred,
+#         })
 
-        # Keep same exogenous feature row for recursive forecasting
-        window_features = pd.concat(
-            [window_features.iloc[1:], pd.DataFrame([last_feature_row])],
-            ignore_index=True
-        )
+#         # Keep same exogenous feature row for recursive forecasting
+#         window_features = pd.concat(
+#             [window_features.iloc[1:], pd.DataFrame([last_feature_row])],
+#             ignore_index=True
+#         )
 
-        cur_date = next_date
+#         cur_date = next_date
 
-    return pd.DataFrame(preds)
+#     return pd.DataFrame(preds)
 
-# ============================================================
-# HELPERS
-# ============================================================
+# # ============================================================
+# # HELPERS
+# # ============================================================
 def validate_required_files():
-    required = [DATA_PATH, MODEL_PATH, SCALER_STATS_PATH, FEATURES_PATH, METADATA_PATH]
-    missing = [str(p) for p in required if not p.exists()]
-    if missing:
-        st.error("❌ Missing required files:")
-        for item in missing:
-            st.write(f"- `{item}`")
-        st.info("Run the training pipeline first so the `.keras` model and artifacts are generated.")
-        st.stop()
+    required = [DATA_PATH]
+    # required = [DATA_PATH, MODEL_PATH, SCALER_STATS_PATH, FEATURES_PATH, METADATA_PATH]
+    # missing = [str(p) for p in required if not p.exists()]
+    # if missing:
+    #     st.error("❌ Missing required files:")
+    #     for item in missing:
+    #         st.write(f"- `{item}`")
+    #     st.info("Run the training pipeline first so the `.keras` model and artifacts are generated.")
+    #     st.stop()
 
 
-def apply_saved_standard_scaler(X: np.ndarray, scaler_stats: dict) -> np.ndarray:
-    """
-    Rebuild StandardScaler transform behavior using plain saved arrays.
-    Formula: z = (x - mean) / scale
-    """
-    mean_ = scaler_stats["mean_"]
-    scale_ = scaler_stats["scale_"]
-    with_mean = scaler_stats["with_mean"]
-    with_std = scaler_stats["with_std"]
+# def apply_saved_standard_scaler(X: np.ndarray, scaler_stats: dict) -> np.ndarray:
+#     """
+#     Rebuild StandardScaler transform behavior using plain saved arrays.
+#     Formula: z = (x - mean) / scale
+#     """
+#     mean_ = scaler_stats["mean_"]
+#     scale_ = scaler_stats["scale_"]
+#     with_mean = scaler_stats["with_mean"]
+#     with_std = scaler_stats["with_std"]
 
-    X_out = X.astype(np.float32).copy()
+#     X_out = X.astype(np.float32).copy()
 
-    if with_mean:
-        X_out = X_out - mean_
+#     if with_mean:
+#         X_out = X_out - mean_
 
-    if with_std:
-        safe_scale = np.where(scale_ == 0, 1.0, scale_)
-        X_out = X_out / safe_scale
+#     if with_std:
+#         safe_scale = np.where(scale_ == 0, 1.0, scale_)
+#         X_out = X_out / safe_scale
 
-    return X_out
+#     return X_out
 
 
 @st.cache_data
