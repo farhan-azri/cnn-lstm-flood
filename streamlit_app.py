@@ -44,36 +44,110 @@ if loc_df.empty:
     st.stop()
 
 
+
 # ============================================================
-# SIDEBAR FILTER (DATE RANGE)
+# SIDEBAR FILTER (ROBUST DATE RANGE + QUICK SELECT)
 # ============================================================
 st.sidebar.header("📅 Date Filter")
 
-min_date = "2025-01-01" #df["date"].min()
+# Ensure datetime types
+min_date = pd.to_datetime("2025-01-01")
 max_date = df["date"].max()
 
+# -------------------------
+# Helper: clamp date within bounds
+# -------------------------
+def clamp_date(date, min_d, max_d):
+    return max(min(date, max_d), min_d)
+
+# -------------------------
+# Initialize session state
+# -------------------------
+if "start_date" not in st.session_state:
+    st.session_state.start_date = min_date
+
+if "end_date" not in st.session_state:
+    st.session_state.end_date = max_date
+
+# -------------------------
+# Quick Select Buttons
+# -------------------------
+st.sidebar.markdown("### ⚡ Quick Select")
+
+col1, col2 = st.sidebar.columns(2)
+
+with col1:
+    if st.button("Last 3 Months"):
+        proposed = max_date - pd.DateOffset(months=3)
+        st.session_state.start_date = clamp_date(proposed, min_date, max_date)
+        st.session_state.end_date = max_date
+
+    if st.button("Last 6 Months"):
+        proposed = max_date - pd.DateOffset(months=6)
+        st.session_state.start_date = clamp_date(proposed, min_date, max_date)
+        st.session_state.end_date = max_date
+
+with col2:
+    if st.button("Last 1 Year"):
+        proposed = max_date - pd.DateOffset(years=1)
+        st.session_state.start_date = clamp_date(proposed, min_date, max_date)
+        st.session_state.end_date = max_date
+
+    if st.button("Last 2 Years"):
+        proposed = max_date - pd.DateOffset(years=2)
+        st.session_state.start_date = clamp_date(proposed, min_date, max_date)
+        st.session_state.end_date = max_date
+
+# -------------------------
+# Date Picker (always visible)
+# -------------------------
 date_range = st.sidebar.date_input(
     "Select Date Range",
-    value=(min_date, max_date),
-    min_value=min_date,
-    max_value=max_date
+    value=(
+        st.session_state.start_date.date(),
+        st.session_state.end_date.date()
+    ),
+    min_value=min_date.date(),
+    max_value=max_date.date()
 )
 
-# Handle single date selection edge case
+# -------------------------
+# Sync manual selection back to session
+# -------------------------
 if isinstance(date_range, tuple):
-    start_date, end_date = date_range
+    start_date = pd.to_datetime(date_range[0])
+    end_date = pd.to_datetime(date_range[1])
 else:
-    start_date = end_date = date_range
+    start_date = pd.to_datetime(date_range)
+    end_date = pd.to_datetime(date_range)
 
-start_date = pd.to_datetime(start_date)
-end_date = pd.to_datetime(end_date)
+# Clamp again (safety)
+start_date = clamp_date(start_date, min_date, max_date)
+end_date = clamp_date(end_date, min_date, max_date)
 
+# Update session
+st.session_state.start_date = start_date
+st.session_state.end_date = end_date
+
+# -------------------------
 # Apply filter
-loc_df = df[(df["date"] >= start_date) & (df["date"] <= end_date)].copy()
+# -------------------------
+loc_df = df[
+    (df["date"] >= start_date) &
+    (df["date"] <= end_date)
+].copy()
 
 if loc_df.empty:
     st.warning("No data available for selected date range.")
     st.stop()
+
+# -------------------------
+# Display selected range
+# -------------------------
+st.sidebar.markdown(
+    f"**Selected:** {start_date.date()} → {end_date.date()}"
+)
+
 
 
 # ============================================================
@@ -137,7 +211,7 @@ with st.expander("⚡ Extreme Rainfall vs Extreme River Discharge", expanded=Tru
     )
 
     fig_extreme.update_layout(
-        title="Extreme Rainfall vs River Discharge",
+        title=f"Extreme Rainfall vs River Discharge ({start_date.date()} → {end_date.date()})",
         xaxis_title="Date",
         yaxis_title="River Discharge (m³/s)",
         hovermode="x unified",
@@ -185,7 +259,7 @@ with st.expander("🌧️ Hourly Rainfall vs 🌊 Daily River Discharge", expand
             merged = merged[merged["location"] == location_option]
 
         if merged.empty:
-            st.warning("No data available for selected location in 2025.")
+            st.warning("No data available for selected location.")
         else:
             fig_combo = go.Figure()
 
@@ -210,7 +284,7 @@ with st.expander("🌧️ Hourly Rainfall vs 🌊 Daily River Discharge", expand
             )
 
             fig_combo.update_layout(
-                title="Hourly Rainfall vs Daily River Discharge (2025)",
+                title=f"Hourly Rainfall vs Daily River Discharge ({start_date.date()} → {end_date.date()})",
                 xaxis=dict(title="Datetime"),
                 yaxis=dict(title="Rainfall (mm)", side="left"),
                 yaxis2=dict(title="Discharge (m³/s)", overlaying="y", side="right"),
