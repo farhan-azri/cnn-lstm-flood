@@ -13,7 +13,14 @@ from feature_engineering import build_features
 
 def main():
     parser = argparse.ArgumentParser(description="Hourly rainfall + daily discharge pipeline")
-    parser.add_argument("--step", choices=["all", "extract", "features", "train"], default="all")
+
+    # ✅ Added "predict"
+    parser.add_argument(
+        "--step",
+        choices=["all", "extract", "combine", "features", "train", "predict"],
+        default="all"
+    )
+
     parser.add_argument("--start_date", default="2010-01-01")
     parser.add_argument("--end_date", default="2026-03-01")
 
@@ -26,6 +33,9 @@ def main():
 
     args = parser.parse_args()
 
+    # ============================================================
+    # EXTRACT
+    # ============================================================
     if args.step in ("extract", "all"):
         print("📥 Extracting hourly rainfall/weather...")
         extract_hourly_rainfall(
@@ -38,7 +48,7 @@ def main():
         extract_seasonal_hourly(
             out_path=args.weather_forecast_path
         )
-        
+
         print("📥 Extracting ensemble weather forecast...")
         extract_ensemble_hourly(
             out_path=args.weather_ensemble_path
@@ -52,7 +62,7 @@ def main():
         )
 
     # ============================================================
-    # COMBINE STEP
+    # COMBINE
     # ============================================================
     if args.step in ("combine", "all"):
         print("🔗 Combining rainfall + discharge into single dataset...")
@@ -68,9 +78,13 @@ def main():
             raise FileNotFoundError(
                 f"❌ Combined file not created: {args.combine_out_path}"
             )
-        
+
+    # ============================================================
+    # FEATURES
+    # ============================================================
     if args.step in ("features", "all"):
         print("⚙️ Building daily features (hourly → daily + merge)...")
+
         build_features(
             weather_hourly_path=args.weather_hourly_path,
             flood_daily_path=args.flood_daily_path,
@@ -79,13 +93,33 @@ def main():
         )
 
         if not Path(args.features_out_path).exists():
-            raise FileNotFoundError(f"❌ Feature file not created: {args.features_out_path}")
+            raise FileNotFoundError(
+                f"❌ Feature file not created: {args.features_out_path}"
+            )
 
+    # ============================================================
+    # TRAIN
+    # ============================================================
     if args.step in ("train", "all"):
         print("🤖 Training CNN-LSTM model...")
-        subprocess.run([sys.executable, "model_cnn_lstm.py"], check=True)
 
-    print("✅ Done. For EDA + prediction dashboard, run: streamlit run streamlit_app.py")
+        subprocess.run(
+            [sys.executable, "model_cnn_lstm.py"],
+            check=True
+        )
+
+    # ============================================================
+    # 🔥 NEW: PREDICTION STEP
+    # ============================================================
+    if args.step in ("predict", "all"):
+        print("🌊 Running flood potential prediction...")
+
+        subprocess.run(
+            [sys.executable, "flood-potential-prediction.py"],
+            check=True
+        )
+
+    print("✅ Done. For EDA + dashboard, run: streamlit run streamlit_app.py")
 
 
 if __name__ == "__main__":

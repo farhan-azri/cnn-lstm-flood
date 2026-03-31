@@ -24,6 +24,21 @@ def load_data():
 
 df = load_data()
 
+@st.cache_data
+def load_forecast():
+    forecast_path = Path("data/flood_forecast_output.csv")
+
+    if not forecast_path.exists():
+        return None
+
+    df = pd.read_csv(forecast_path)
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df["location"] = df["location"].astype(str).str.strip()
+
+    return df.sort_values(["location", "date"]).reset_index(drop=True)
+
+forecast_df = load_forecast()
+
 # ============================================================
 # SIDEBAR FILTER
 # ============================================================
@@ -294,3 +309,118 @@ with st.expander("🌧️ Hourly Rainfall vs 🌊 Daily River Discharge", expand
             )
 
             st.plotly_chart(fig_combo, use_container_width=True)
+
+
+# ============================================================
+# 🔮 FORECAST DATE FILTER (SEPARATE)
+# ============================================================
+if forecast_df is not None and not forecast_df.empty:
+
+    st.sidebar.header("🔮 Forecast Date Filter")
+
+    forecast_min_date = forecast_df["date"].min()
+    forecast_max_date = forecast_df["date"].max()
+
+    forecast_range = st.sidebar.date_input(
+        "Select Forecast Date Range",
+        value=(
+            forecast_min_date.date(),
+            forecast_max_date.date()
+        ),
+        min_value=forecast_min_date.date(),
+        max_value=forecast_max_date.date(),
+        key="forecast_date_range"
+    )
+
+    if isinstance(forecast_range, tuple):
+        f_start = pd.to_datetime(forecast_range[0])
+        f_end = pd.to_datetime(forecast_range[1])
+    else:
+        f_start = pd.to_datetime(forecast_range)
+        f_end = pd.to_datetime(forecast_range)
+
+    forecast_df = forecast_df[
+        (forecast_df["date"] >= f_start) &
+        (forecast_df["date"] <= f_end)
+    ].copy()
+
+
+
+# ============================================================
+# 🔮 FLOOD FORECAST VISUALIZATION
+# ============================================================
+with st.expander("🔮 Flood Forecast Analysis", expanded=True):
+
+    if forecast_df is None or forecast_df.empty:
+        st.warning("No forecast data available. Run prediction pipeline first.")
+    else:
+        plot_df = forecast_df.copy()
+
+        if location_option != "Both":
+            plot_df = plot_df[plot_df["location"] == location_option]
+
+        if plot_df.empty:
+            st.warning("No forecast data for selected location.")
+        else:
+            fig_forecast = go.Figure()
+
+            # Predicted discharge line
+            fig_forecast.add_trace(
+                go.Scatter(
+                    x=plot_df["date"],
+                    y=plot_df["predicted_discharge"],
+                    mode="lines+markers",
+                    name="Predicted Discharge (m³/s)",
+                    line=dict(color="blue", width=3),
+                )
+            )
+
+            # Flood risk markers
+            risk_colors = {
+                "LOW": "green",
+                "MEDIUM": "orange",
+                "HIGH": "red"
+            }
+
+            for risk, color in risk_colors.items():
+                sub = plot_df[plot_df["flood_risk"] == risk]
+
+                fig_forecast.add_trace(
+                    go.Scatter(
+                        x=sub["date"],
+                        y=sub["predicted_discharge"],
+                        mode="markers",
+                        name=f"{risk} Risk",
+                        marker=dict(size=10, color=color, line=dict(color="black", width=1)),
+                    )
+                )
+
+            fig_forecast.update_layout(
+                title="🔮 Predicted River Discharge & Flood Risk",
+                xaxis_title="Date",
+                yaxis_title="Discharge (m³/s)",
+                hovermode="x unified",
+                legend=dict(orientation="h", y=1.1)
+            )
+
+            st.plotly_chart(fig_forecast, use_container_width=True)
+
+            # ========================================================
+            # 📊 Summary Metrics
+            # ========================================================
+            col1, col2, col3 = st.columns(3)
+
+            col1.metric(
+                "🔴 High Risk Days",
+                (plot_df["flood_risk"] == "HIGH").sum()
+            )
+
+            col2.metric(
+                "🟠 Medium Risk Days",
+                (plot_df["flood_risk"] == "MEDIUM").sum()
+            )
+
+            col3.metric(
+                "🟢 Low Risk Days",
+                (plot_df["flood_risk"] == "LOW").sum()
+            )
