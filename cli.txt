@@ -1,3 +1,6 @@
+
+python Chapter\ 4/cnn-lstm-confustion-matrix.py
+
 deactivate 2>/dev/null || true
 
 rm -rf venv
