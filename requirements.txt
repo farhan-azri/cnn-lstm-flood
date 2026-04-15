@@ -17,6 +17,7 @@ setuptools
 wheel
 h5py
 matplotlib
+seaborn
 
 # streamlit
 # pandas
